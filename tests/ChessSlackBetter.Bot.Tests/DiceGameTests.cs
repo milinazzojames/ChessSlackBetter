@@ -15,6 +15,7 @@ public class DiceGameTests
 
     private readonly FakeSlackApi _slack = new();
     private readonly InMemoryGameRepository _games = new();
+    private readonly InMemoryUserRepository _users = new();
     private readonly FakeDiceJudge _judge = new();
     private readonly FakeDiceRoller _roller = new();
     private readonly ChessBotService _bot;
@@ -23,7 +24,7 @@ public class DiceGameTests
     public DiceGameTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, _games, new FakeAnalysisLinks(), _judge, _roller, options, TimeProvider.System,
+        _bot = new ChessBotService(_slack, _games, _users, new FakeAnalysisLinks(), _judge, _roller, options, TimeProvider.System,
             NullLogger<ChessBotService>.Instance);
     }
 

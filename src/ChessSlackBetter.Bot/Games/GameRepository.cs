@@ -32,35 +32,8 @@ public sealed class SqliteGameRepository : IGameRepository
 
     public SqliteGameRepository(string databasePath)
     {
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
-        using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            CREATE TABLE IF NOT EXISTS games (
-                channel_id      TEXT NOT NULL,
-                thread_ts       TEXT NOT NULL,
-                challenger_id   TEXT NOT NULL,
-                opponent_id     TEXT NOT NULL,
-                white_id        TEXT NOT NULL,
-                black_id        TEXT NOT NULL,
-                state           TEXT NOT NULL,
-                moves           TEXT NOT NULL,
-                draw_offered_by TEXT,
-                outcome         TEXT NOT NULL,
-                termination     TEXT NOT NULL,
-                analysis_url    TEXT,
-                created_at      TEXT NOT NULL,
-                updated_at      TEXT NOT NULL,
-                PRIMARY KEY (channel_id, thread_ts)
-            );
-            CREATE INDEX IF NOT EXISTS ix_games_white ON games (white_id, state);
-            CREATE INDEX IF NOT EXISTS ix_games_black ON games (black_id, state);
-            """;
-        command.ExecuteNonQuery();
-
-        // Columns added after the first release; older databases get them here.
-        AddColumnIfMissing(connection, "mode", "TEXT NOT NULL DEFAULT 'Standard'");
-        AddColumnIfMissing(connection, "dice", "TEXT");
+        _connectionString = Database.ConnectionString(databasePath);
+        Database.EnsureSchema(_connectionString);
     }
 
     public async Task<GameRecord?> GetAsync(string channelId, string threadTs, CancellationToken ct = default)
@@ -89,7 +62,8 @@ public sealed class SqliteGameRepository : IGameRepository
                 outcome = excluded.outcome,
                 termination = excluded.termination,
                 analysis_url = excluded.analysis_url,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at;
+            INSERT OR IGNORE INTO users (user_id, created_at) VALUES ($white, $created), ($black, $created);
             """;
         command.Parameters.AddWithValue("$channel", game.ChannelId);
         command.Parameters.AddWithValue("$thread", game.ThreadTs);
@@ -131,27 +105,7 @@ public sealed class SqliteGameRepository : IGameRepository
         return await ReadAllAsync(command, ct);
     }
 
-    private static void AddColumnIfMissing(SqliteConnection connection, string column, string definition)
-    {
-        using var check = connection.CreateCommand();
-        check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = $name";
-        check.Parameters.AddWithValue("$name", column);
-        if (Convert.ToInt64(check.ExecuteScalar()) > 0)
-        {
-            return;
-        }
-
-        using var alter = connection.CreateCommand();
-        alter.CommandText = $"ALTER TABLE games ADD COLUMN {column} {definition}";
-        alter.ExecuteNonQuery();
-    }
-
-    private SqliteConnection Open()
-    {
-        var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        return connection;
-    }
+    private SqliteConnection Open() => Database.Open(_connectionString);
 
     private static async Task<List<GameRecord>> ReadAllAsync(SqliteCommand command, CancellationToken ct)
     {

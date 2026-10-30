@@ -1,4 +1,5 @@
 using ChessSlackBetter.Bot.Games;
+using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -14,6 +15,7 @@ public class ChessBotServiceTests
 
     private readonly FakeSlackApi _slack = new();
     private readonly InMemoryGameRepository _games = new();
+    private readonly InMemoryUserRepository _users = new();
     private readonly FakeAnalysisLinks _analysis = new();
     private readonly ChessBotService _bot;
     private int _ts = 1;
@@ -21,7 +23,7 @@ public class ChessBotServiceTests
     public ChessBotServiceTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, _games, _analysis, new FakeDiceJudge(), new FakeDiceRoller(), options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
+        _bot = new ChessBotService(_slack, _games, _users, _analysis, new FakeDiceJudge(), new FakeDiceRoller(), options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
     }
 
     [Fact]
@@ -66,6 +68,27 @@ public class ChessBotServiceTests
         Assert.Equal(thread, board.ThreadTs);
         Assert.Contains($"<@{Alice}>, it's your move (white)", board.Text);
         Assert.Contains("board.png?fen=", board.Blocks!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task Board_uses_the_preferences_of_the_player_to_move()
+    {
+        await Mention(Bob, "theme Blue");
+        await Mention(Bob, "pieces fantasy");
+        Assert.Equal(new UserPreferences("blue", "fantasy"), _users.Preferences[Bob]);
+        await Mention(Bob, "theme plaid");
+        Assert.Contains("no `plaid` board theme", _slack.Ephemeral[^1].Text);
+        await Mention(Bob, "pieces");
+        Assert.Contains("Your piece set is *fantasy*", _slack.Ephemeral[^1].Text);
+
+        var thread = await StartChallenge();
+        await Click(Bob, ActionIds.Accept, thread);
+        Assert.DoesNotContain("theme=", _slack.Posted[^1].Blocks!.ToJsonString());
+
+        await Mention(Alice, "e4", thread);
+        var url = _slack.Posted[^1].Blocks!.ToJsonString();
+        Assert.Contains("theme=blue", url);
+        Assert.Contains("pieces=fantasy", url);
     }
 
     [Fact]
@@ -230,7 +253,7 @@ public class ChessBotServiceTests
     [Fact]
     public async Task Text_boards_are_used_without_a_public_url()
     {
-        var bot = new ChessBotService(_slack, _games, _analysis, new FakeDiceJudge(), new FakeDiceRoller(), Options.Create(new ChessBotOptions()), TimeProvider.System, NullLogger<ChessBotService>.Instance);
+        var bot = new ChessBotService(_slack, _games, _users, _analysis, new FakeDiceJudge(), new FakeDiceRoller(), Options.Create(new ChessBotOptions()), TimeProvider.System, NullLogger<ChessBotService>.Instance);
         await bot.HandleMessageAsync(new(Channel, Alice, $"<@{FakeSlackApi.BotId}> challenge <@{Bob}> white", NextTs(), null, true));
         var thread = "1000.000100";
         await bot.HandleActionAsync(new(ActionIds.Accept, Bob, Channel, thread));

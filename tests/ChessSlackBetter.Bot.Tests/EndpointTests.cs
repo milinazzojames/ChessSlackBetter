@@ -34,7 +34,7 @@ public sealed class EndpointTests : IClassFixture<EndpointTests.Factory>
     {
         using var client = _factory.CreateClient();
         var fen = Uri.EscapeDataString(Chess.Position.StartFen);
-        var response = await client.GetAsync($"/board.png?fen={fen}&last=e2e4&pov=b");
+        var response = await client.GetAsync($"/board.png?fen={fen}&last=e2e4&pov=b&theme=blue&pieces=fantasy");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
 

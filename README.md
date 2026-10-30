@@ -25,6 +25,8 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 | Game thread | `@ChessBetterBot board` / `pgn` | Re-post the board / export the game |
 | Anywhere | `@ChessBetterBot games` | Your open games, with links |
 | Anywhere | `@ChessBetterBot stats [@user]` / `leaderboard` | Results |
+| Anywhere | `@ChessBetterBot theme [brown\|blue\|green\|purple\|grey\|pink\|bolt]` | Show or set your board colours, used for the board on your turn |
+| Anywhere | `@ChessBetterBot pieces [cburnett\|chessnut\|fantasy\|rhosgfx\|bolt]` | Show or set your piece set, used for the board on your turn |
 | Anywhere | `@ChessBetterBot help` | Help |
 
 ## ChessDiceRoll
@@ -119,5 +121,14 @@ dotnet test
 
 ## Credits
 
-Piece images are the "cburnett" set by Colin M.L. Burnett, licensed
-[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), as distributed by lichess.org.
+Piece images are from the sets distributed by [lichess.org](https://github.com/lichess-org/lila/blob/master/COPYING.md),
+in `src/ChessSlackBetter.Bot/Rendering/Pieces/`:
+
+| Set | Author | Licence |
+|---|---|---|
+| cburnett | Colin M.L. Burnett | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| chessnut | Alexis Luengas | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| fantasy | Maurizio Monge | [MIT](https://opensource.org/license/mit) |
+| rhosgfx | RhosGFX | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+
+The `bolt` set (fasteners, in Bolt Depot colours) was drawn for this project.

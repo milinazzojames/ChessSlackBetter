@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using ChessSlackBetter.Bot.Games;
 using ChessSlackBetter.Bot.Rendering;
 using ChessSlackBetter.Bot.Slack;
+using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
 using Microsoft.Extensions.Options;
 
@@ -194,10 +195,10 @@ public sealed class SqliteGameRepositoryTests : IDisposable
     public async Task Upgrades_old_databases_and_round_trips_dice_state()
     {
         // A database created before dice mode existed.
-        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_path}"))
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_path}"))
         {
             connection.Open();
-            using var create = connection.CreateCommand();
+            await using var create = connection.CreateCommand();
             create.CommandText = """
                 CREATE TABLE games (channel_id TEXT NOT NULL, thread_ts TEXT NOT NULL, challenger_id TEXT NOT NULL,
                     opponent_id TEXT NOT NULL, white_id TEXT NOT NULL, black_id TEXT NOT NULL, state TEXT NOT NULL,
@@ -232,6 +233,76 @@ public sealed class SqliteGameRepositoryTests : IDisposable
         Assert.Equal(0, loaded.Dice.VetoesLeft("UB"));
         Assert.Equal(17, loaded.Dice.Log.Single().Roll);
         Assert.Equal(PieceType.Bishop, loaded.LoadGame().Current[Square.Parse("e4")].Type);
+    }
+
+    [Fact]
+    public async Task Backfills_users_from_existing_games_and_adds_new_players()
+    {
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_path}"))
+        {
+            connection.Open();
+            await using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE games (channel_id TEXT NOT NULL, thread_ts TEXT NOT NULL, challenger_id TEXT NOT NULL,
+                    opponent_id TEXT NOT NULL, white_id TEXT NOT NULL, black_id TEXT NOT NULL, state TEXT NOT NULL,
+                    moves TEXT NOT NULL, draw_offered_by TEXT, outcome TEXT NOT NULL, termination TEXT NOT NULL,
+                    analysis_url TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (channel_id, thread_ts));
+                INSERT INTO games VALUES ('C1', '1', 'UA', 'UB', 'UA', 'UB', 'Finished', 'e2e4', NULL, 'Ongoing', 'None', NULL,
+                    '2026-02-01T00:00:00+00:00', '2026-02-01T00:00:00+00:00');
+                INSERT INTO games VALUES ('C1', '2', 'UB', 'UA', 'UB', 'UA', 'Active', '', NULL, 'Ongoing', 'None', NULL,
+                    '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00');
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        var repo = new SqliteGameRepository(_path);
+        _ = new SqliteGameRepository(_path); // Running the backfill again is harmless.
+
+        var now = DateTimeOffset.UtcNow;
+        await repo.SaveAsync(new GameRecord
+        {
+            ChannelId = "C1", ThreadTs = "3", ChallengerId = "UA", OpponentId = "UC", WhiteId = "UA", BlackId = "UC",
+            CreatedAt = now, UpdatedAt = now,
+        });
+
+        await using var check = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_path}");
+        check.Open();
+        await using var query = check.CreateCommand();
+        query.CommandText = "SELECT user_id, created_at FROM users ORDER BY user_id";
+        await using var reader = await query.ExecuteReaderAsync();
+        var users = new List<(string, string)>();
+        while (reader.Read())
+        {
+            users.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        Assert.Equal(
+            [("UA", "2026-01-01T00:00:00+00:00"), ("UB", "2026-01-01T00:00:00+00:00"), ("UC", now.ToString("O"))],
+            users);
+    }
+
+    [Fact]
+    public async Task Stores_preferences_for_new_and_existing_users()
+    {
+        var users = new SqliteUserRepository(_path);
+        var repo = new SqliteGameRepository(_path);
+        var now = DateTimeOffset.UtcNow;
+        await repo.SaveAsync(new GameRecord
+        {
+            ChannelId = "C1", ThreadTs = "1", ChallengerId = "UA", OpponentId = "UB", WhiteId = "UA", BlackId = "UB",
+            CreatedAt = now, UpdatedAt = now,
+        });
+
+        Assert.Equal(UserPreferences.None, await users.GetPreferencesAsync("UA"));
+        await users.SetThemeAsync("UA", "blue");
+        await users.SetPiecesAsync("UA", "fantasy");
+        await users.SetPiecesAsync("UNEW", "chessnut");
+        await users.SetThemeAsync("UA", "purple");
+
+        Assert.Equal(new UserPreferences("purple", "fantasy"), await users.GetPreferencesAsync("UA"));
+        Assert.Equal(new UserPreferences(null, "chessnut"), await users.GetPreferencesAsync("UNEW"));
+        Assert.Equal(UserPreferences.None, await users.GetPreferencesAsync("UB"));
+        Assert.Equal(UserPreferences.None, await users.GetPreferencesAsync("UNKNOWN"));
     }
 
     public void Dispose()

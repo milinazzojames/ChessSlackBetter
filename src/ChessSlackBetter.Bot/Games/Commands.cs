@@ -47,6 +47,12 @@ public sealed record StatsCommand(string? UserId) : BotCommand;
 
 public sealed record LeaderboardCommand(GameMode Mode = GameMode.Standard) : BotCommand;
 
+/// <summary>Set the asker's board theme; <see cref="Name"/> is null to show the current one and the choices.</summary>
+public sealed record ThemeCommand(string? Name) : BotCommand;
+
+/// <summary>Set the asker's piece set; <see cref="Name"/> is null to show the current one and the choices.</summary>
+public sealed record PiecesCommand(string? Name) : BotCommand;
+
 public sealed record UnknownCommand(string Text) : BotCommand;
 
 public static partial class CommandParser
@@ -117,6 +123,10 @@ public static partial class CommandParser
                 return new LeaderboardCommand(words.Skip(1).Any(w => w.StartsWith("dice", StringComparison.OrdinalIgnoreCase))
                     ? GameMode.DiceRoll
                     : GameMode.Standard);
+            case "theme" or "colours" or "colors":
+                return new ThemeCommand(words.Length > 1 ? words[1] : null);
+            case "pieces" or "piece":
+                return new PiecesCommand(words.Length > 1 ? words[1] : null);
             case "move" or "m" when words.Length > 1:
                 return new MoveCommand(words[1]);
         }

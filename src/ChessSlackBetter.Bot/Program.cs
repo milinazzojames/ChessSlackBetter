@@ -3,6 +3,7 @@ using ChessSlackBetter.Bot.Dice;
 using ChessSlackBetter.Bot.Games;
 using ChessSlackBetter.Bot.Rendering;
 using ChessSlackBetter.Bot.Slack;
+using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,7 @@ builder.Services.AddSingleton<SlackSignatureVerifier>();
 builder.Services.AddHttpClient<ISlackApi, SlackApiClient>();
 builder.Services.AddHttpClient<IAnalysisLinks, LichessClient>(http => http.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<IGameRepository, SqliteGameRepository>();
+builder.Services.AddSingleton<IUserRepository, SqliteUserRepository>();
 builder.Services.AddSingleton<BoardRenderer>();
 builder.Services.Configure<AnthropicOptions>(builder.Configuration.GetSection(AnthropicOptions.Section));
 builder.Services.AddSingleton<IDiceJudge, ClaudeDiceJudge>();
@@ -31,8 +33,9 @@ app.MapGet("/healthz", () => Results.Ok("ok"));
 app.MapSlackEndpoints();
 
 // Slack fetches board images from here. The URL encodes the whole position, so responses can be cached forever.
-// `last` is a UCI move to highlight; `hl` is a comma-separated list of squares (used after dice rolls).
-app.MapGet("/board.png", (string fen, string? last, string? hl, string? pov, BoardRenderer renderer, HttpResponse response) =>
+// `last` is a UCI move to highlight; `hl` is a comma-separated list of squares (used after dice rolls);
+// `theme` is a BoardTheme name and `pieces` a PieceSet name; unknown or missing names use the defaults.
+app.MapGet("/board.png", (string fen, string? last, string? hl, string? pov, string? theme, string? pieces, BoardRenderer renderer, HttpResponse response) =>
 {
     Position position;
     try
@@ -63,7 +66,7 @@ app.MapGet("/board.png", (string fen, string? last, string? hl, string? pov, Boa
 
     var perspective = pov == "b" ? PieceColor.Black : PieceColor.White;
     response.Headers.CacheControl = "public, max-age=31536000, immutable";
-    return Results.File(renderer.RenderPng(position, highlights, perspective), "image/png");
+    return Results.File(renderer.RenderPng(position, highlights, perspective, BoardTheme.Find(theme), PieceSet.Find(pieces)), "image/png");
 });
 
 app.Run();
