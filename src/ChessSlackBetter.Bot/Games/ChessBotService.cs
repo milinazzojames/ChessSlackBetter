@@ -133,6 +133,9 @@ public sealed partial class ChessBotService(
             case AbortCommand:
                 await AbortAsync(record, message.UserId, reply, ct);
                 break;
+            case UndoCommand:
+                await UndoAsync(record, message.UserId, reply, ct);
+                break;
             case BoardCommand:
                 await ShowBoardAsync(record, reply, ct);
                 break;
@@ -497,6 +500,45 @@ public sealed partial class ChessBotService(
         record.SyncFrom(game);
         await SaveAsync(record, ct);
         await FinishAsync(record, game, ct);
+    }
+
+    private async Task UndoAsync(GameRecord record, string userId, Func<string, Task> reply, CancellationToken ct)
+    {
+        if (!await EnsureActivePlayerAsync(record, userId, reply))
+        {
+            return;
+        }
+
+        if (record.Mode != GameMode.Standard)
+        {
+            await reply("Undo is only allowed in normal chess games.");
+            return;
+        }
+
+        if (record.UndosUsedBy.Contains(userId))
+        {
+            await reply("You've already used your undo this game.");
+            return;
+        }
+
+        // Only your own last move, while your opponent hasn't replied, so nobody loses a move they've made.
+        var game = record.LoadGame();
+        if (game.Moves.Count == 0 || game.Current.SideToMove == record.ColorOf(userId))
+        {
+            await reply("You can only undo your last move, before your opponent replies.");
+            return;
+        }
+
+        var undone = game.Moves[^1].San;
+        var previous = Game.Replay(record.Moves.SkipLast(1));
+        record.SyncFrom(previous);
+        record.UndosUsedBy.Add(userId);
+        record.DrawOfferedBy = null;
+        await SaveAsync(record, ct);
+
+        await slack.PostMessageAsync(new SlackMessage(record.ChannelId,
+            $":leftwards_arrow_with_hook: <@{userId}> took back *{undone}*. That was their one undo this game.", ThreadTs: record.ThreadTs), ct);
+        await PostBoardAsync(record, previous, ct);
     }
 
     private async Task ShowBoardAsync(GameRecord record, Func<string, Task> reply, CancellationToken ct)

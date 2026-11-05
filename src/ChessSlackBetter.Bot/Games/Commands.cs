@@ -40,6 +40,9 @@ public sealed record DeclineDrawCommand : BotCommand;
 
 public sealed record AbortCommand : BotCommand;
 
+/// <summary>Take back your last move before your opponent replies. Once per player per normal game.</summary>
+public sealed record UndoCommand : BotCommand;
+
 public sealed record BoardCommand : BotCommand;
 
 public sealed record PgnCommand : BotCommand;
@@ -125,6 +128,8 @@ public static partial class CommandParser
                 return new DrawCommand();
             case "abort":
                 return new AbortCommand();
+            case "undo" or "takeback" or "oops":
+                return new UndoCommand();
             case "board" or "show" or "status":
                 return new BoardCommand();
             case "pgn" or "analyze" or "analysis":

@@ -34,6 +34,7 @@ public static partial class Messages
           Long notation works for everything: castle with `e1g1`, promote with `c7c8q` (q, r, b or n)
         • `@ChessBetterBot resign` · `@ChessBetterBot draw` (offer or accept) · `@ChessBetterBot decline draw`
         • `@ChessBetterBot abort` — cancel before both players have moved
+        • `@ChessBetterBot undo` — take back your last move before your opponent replies (once per player, normal chess only)
         • `@ChessBetterBot board` — show the board again · `@ChessBetterBot pgn` — export / analyse
 
         *ChessDiceRoll* :game_die:

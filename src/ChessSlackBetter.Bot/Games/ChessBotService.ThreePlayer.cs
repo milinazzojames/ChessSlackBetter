@@ -97,6 +97,9 @@ public sealed partial class ChessBotService
             case VetoCommand:
                 await VetoThreePlayerAsync(record, message.UserId, reply, ct);
                 break;
+            case UndoCommand:
+                await reply("Undo is only allowed in normal chess games.");
+                break;
             case UnknownCommand unknown:
                 await reply(UnknownText(unknown));
                 break;
