@@ -11,6 +11,7 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 - Full rules: castling, en passant, promotion, checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Finished games are imported to lichess for computer analysis; PGN export any time
 - `@ChessBetterBot stats`, `@ChessBetterBot leaderboard`, `@ChessBetterBot games`
+- [Elo ratings](#ratings) for each mode, with the change shown when a game ends
 
 ## Commands
 
@@ -26,10 +27,23 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 | Anywhere | `@ChessBetterBot chess960 @user [white\|black]` | Challenge someone to [Chess960](#chess960) |
 | Anywhere | `@ChessBetterBot threeplayerchess @user @user` | Challenge two people to [Three-Player Chess](#three-player-chess) |
 | Anywhere | `@ChessBetterBot games` | Your open games, with links |
-| Anywhere | `@ChessBetterBot stats [@user]` / `leaderboard` | Results |
+| Anywhere | `@ChessBetterBot stats [@user]` / `leaderboard` | Results and [Elo ratings](#ratings) |
 | Anywhere | `@ChessBetterBot theme [brown\|blue\|green\|purple\|grey\|pink\|bolt]` | Show or set your board colours, used for the board on your turn |
 | Anywhere | `@ChessBetterBot pieces [cburnett\|chessnut\|fantasy\|rhosgfx\|bolt]` | Show or set your piece set, used for the board on your turn |
 | Anywhere | `@ChessBetterBot help` | Help |
+
+## Ratings
+
+Two-player games are rated with [Elo](https://en.wikipedia.org/wiki/Elo_rating_system). Everyone starts at 1200,
+and after each game both players move by 32 × (score − expected score). The score is 1 for a win, ½ for a draw and
+0 for a loss. Two equal players swap 16 points, and beating someone 400 points above you is worth about 29.
+
+- Standard, ChessDiceRoll and Chess960 each have their own rating, and `leaderboard` is ranked by rating.
+- The game-over message shows both players' new ratings and how much they moved, and `stats` shows your rating
+  for each mode.
+- Aborted games don't count. Ratings aren't stored. They're replayed from every finished game in the order the
+  games ended, so games played before ratings existed count too.
+- Three-player games keep their placement points.
 
 ## ChessDiceRoll
 

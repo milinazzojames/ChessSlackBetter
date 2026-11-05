@@ -81,7 +81,7 @@ public class Chess960GameTests
 
         await Mention(Alice, "leaderboard 960");
         Assert.Contains("Chess960 Leaderboard", _slack.Posted[^1].Text);
-        Assert.Contains($"<@{Alice}> — *1* pts", _slack.Posted[^1].Text);
+        Assert.Contains($"<@{Alice}> — *1216*", _slack.Posted[^1].Text);
 
         await Mention(Alice, "leaderboard");
         Assert.Contains("No games have been finished yet", _slack.Posted[^1].Text);

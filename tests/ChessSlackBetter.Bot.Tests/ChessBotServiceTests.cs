@@ -229,8 +229,35 @@ public class ChessBotServiceTests
         await Mention(Carol, "leaderboard");
         var board = _slack.Posted[^1].Text;
         Assert.True(board.IndexOf(Alice, StringComparison.Ordinal) < board.IndexOf(Bob, StringComparison.Ordinal));
-        Assert.Contains("*1.5* pts", board);
+        Assert.Contains($"1. <@{Alice}> — *1215* (1W 0L 1D)", board);
+        Assert.Contains($"2. <@{Bob}> — *1185* (0W 1L 1D)", board);
     }
+
+    [Fact]
+    public async Task Game_over_shows_rating_changes()
+    {
+        var first = await StartGame();
+        await Click(Bob, ActionIds.Resign, first);
+        Assert.Contains($"Ratings: <@{Alice}> *1216* (+16) · <@{Bob}> *1184* (−16)", _slack.Posted[^1].Blocks!.ToJsonString(Json));
+
+        var second = await StartGame();
+        await Mention(Alice, "resign", second);
+        Assert.Contains($"Ratings: <@{Alice}> *1199* (−17) · <@{Bob}> *1201* (+17)", _slack.Posted[^1].Blocks!.ToJsonString(Json));
+
+        await Mention(Bob, $"stats <@{Alice}>");
+        Assert.Contains("(2 games) · rating *1199*", _slack.Posted[^1].Text);
+    }
+
+    [Fact]
+    public async Task Aborted_games_show_no_rating_change()
+    {
+        var thread = await StartGame();
+        await Mention(Alice, "abort", thread);
+        Assert.DoesNotContain("Ratings:", _slack.Posted[^1].Blocks?.ToJsonString(Json) ?? "");
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions Json =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     [Fact]
     public async Task Games_lists_open_games_with_links()

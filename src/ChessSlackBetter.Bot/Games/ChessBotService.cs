@@ -567,7 +567,7 @@ public sealed partial class ChessBotService(
         var chess960 = (await StandingsAsync(GameMode.Chess960, ct)).FirstOrDefault(s => s.UserId == userId);
         var threePlayer = (await ThreePlayerStandingsAsync(withDice: false, ct)).FirstOrDefault(s => s.UserId == userId && s.Games > 0);
         var threePlayerDice = (await ThreePlayerStandingsAsync(withDice: true, ct)).FirstOrDefault(s => s.UserId == userId && s.Games > 0);
-        string Line(Standing s) => $"*{s.Wins}* wins, *{s.Losses}* losses, *{s.Draws}* draws ({s.Games} games)";
+        string Line(Standing s) => $"*{s.Wins}* wins, *{s.Losses}* losses, *{s.Draws}* draws ({s.Games} games) · rating *{s.Rating:0}*";
 
         var sb = new StringBuilder();
         if (standard is null && diceGames is null && chess960 is null && threePlayer is null && threePlayerDice is null)
@@ -632,26 +632,31 @@ public sealed partial class ChessBotService(
 
         var sb = new StringBuilder(mode switch
         {
-            GameMode.DiceRoll => ":game_die: *ChessDiceRoll Leaderboard* (1 point per win, ½ per draw)\n",
-            GameMode.Chess960 => $":twisted_rightwards_arrows: *{Messages.Chess960Name} Leaderboard* (1 point per win, ½ per draw)\n",
-            _ => ":trophy: *Leaderboard* (1 point per win, ½ per draw)\n",
+            GameMode.DiceRoll => $":game_die: *ChessDiceRoll Leaderboard* ({RatingNote})\n",
+            GameMode.Chess960 => $":twisted_rightwards_arrows: *{Messages.Chess960Name} Leaderboard* ({RatingNote})\n",
+            _ => $":trophy: *Leaderboard* ({RatingNote})\n",
         });
         var rank = 1;
         foreach (var s in standings.Take(10))
         {
             var gambles = dice ? $" · gambles won {s.RollsWon}/{s.RollsTaken}" : "";
-            sb.AppendLine($"{rank++}. <@{s.UserId}> — *{s.Points:0.#}* pts ({s.Wins}W {s.Losses}L {s.Draws}D){gambles}");
+            sb.AppendLine($"{rank++}. <@{s.UserId}> — *{s.Rating:0}* ({s.Wins}W {s.Losses}L {s.Draws}D){gambles}");
         }
 
         await slack.PostMessageAsync(new SlackMessage(message.ChannelId, sb.ToString(), ThreadTs: message.ThreadTs), ct);
     }
 
+    private static readonly string RatingNote = $"Elo rating, everyone starts at {Elo.StartingRating:0}";
+
+    /// <summary>Results and Elo ratings for one two-player mode. Ratings are replayed from the finished games in the order they ended.</summary>
     private async Task<List<Standing>> StandingsAsync(GameMode mode, CancellationToken ct)
     {
         var table = new Dictionary<string, Standing>();
         Standing For(string user) => table.TryGetValue(user, out var s) ? s : table[user] = new Standing(user);
+        var elo = new Elo();
 
-        foreach (var record in await games.GetFinishedGamesAsync(ct))
+        var finished = (await games.GetFinishedGamesAsync(ct)).OrderBy(g => g.UpdatedAt).ThenBy(g => g.CreatedAt);
+        foreach (var record in finished)
         {
             if (record.Termination == Termination.Abandoned || record.Mode != mode)
             {
@@ -680,10 +685,17 @@ public sealed partial class ChessBotService(
                     white.Draws++;
                     black.Draws++;
                     break;
+                default:
+                    continue;
             }
+
+            var whiteScore = record.Outcome switch { GameOutcome.WhiteWins => 1, GameOutcome.BlackWins => 0, _ => 0.5 };
+            (white.LastChange, black.LastChange) = elo.Record(record.WhiteId, record.BlackId, whiteScore);
+            white.Rating = elo.RatingOf(record.WhiteId);
+            black.Rating = elo.RatingOf(record.BlackId);
         }
 
-        return table.Values.OrderByDescending(s => s.Points).ThenByDescending(s => s.Games).ToList();
+        return table.Values.OrderByDescending(s => s.Rating).ThenByDescending(s => s.Games).ToList();
     }
 
     private async Task<bool> EnsureActivePlayerAsync(GameRecord record, string userId, Func<string, Task> reply)
@@ -727,14 +739,35 @@ public sealed partial class ChessBotService(
             }
         }
 
-        await PostGameOverAsync(record, game, broadcast: true, ct);
+        await PostGameOverAsync(record, game, broadcast: true, ct, await RatingChangesAsync(record, ct));
         await UpdateCardAsync(record, game, ct);
     }
 
-    private async Task PostGameOverAsync(GameRecord record, Game game, bool broadcast, CancellationToken ct)
+    /// <summary>"Ratings: @white 1216 (+16) · @black 1184 (−16)" for a game that has just finished, or null if it doesn't count.</summary>
+    private async Task<string?> RatingChangesAsync(GameRecord record, CancellationToken ct)
+    {
+        if (record.Termination == Termination.Abandoned || record.Outcome == GameOutcome.Ongoing)
+        {
+            return null;
+        }
+
+        // The game was saved as finished just now, so it's the latest game for both players.
+        var standings = await StandingsAsync(record.Mode, ct);
+        string Part(string userId)
+        {
+            var s = standings.First(x => x.UserId == userId);
+            var change = Math.Round(s.LastChange);
+            var sign = change > 0 ? "+" : change < 0 ? "−" : "±";
+            return $"<@{userId}> *{s.Rating:0}* ({sign}{Math.Abs(change):0})";
+        }
+
+        return $":chart_with_upwards_trend: Ratings: {Part(record.WhiteId)} · {Part(record.BlackId)}";
+    }
+
+    private async Task PostGameOverAsync(GameRecord record, Game game, bool broadcast, CancellationToken ct, string? ratings = null)
     {
         var pgn = await BuildPgnAsync(record, game, ct);
-        var content = Messages.GameOver(record, game, pgn, AnalysisUrl(record, game), Options.PublicBaseUrl);
+        var content = Messages.GameOver(record, game, pgn, AnalysisUrl(record, game), Options.PublicBaseUrl, ratings);
         await slack.PostMessageAsync(new SlackMessage(record.ChannelId, content.Text, content.Blocks, record.ThreadTs, broadcast), ct);
     }
 
@@ -846,6 +879,9 @@ public sealed partial class ChessBotService(
 
         public int Games => Wins + Losses + Draws;
 
-        public double Points => Wins + Draws / 2.0;
+        public double Rating { get; set; } = Elo.StartingRating;
+
+        /// <summary>How much <see cref="Rating"/> moved in this player's most recent game.</summary>
+        public double LastChange { get; set; }
     }
 }

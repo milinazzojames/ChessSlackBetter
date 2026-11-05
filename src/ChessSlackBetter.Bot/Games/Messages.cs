@@ -67,7 +67,7 @@ public static partial class Messages
           as gaining it yourself, since it helps the third player too
 
         *Anywhere*
-        • `@ChessBetterBot games` — your open games · `@ChessBetterBot stats [@someone]`
+        • `@ChessBetterBot games` — your open games · `@ChessBetterBot stats [@someone]` — results and Elo ratings (everyone starts at 1200)
         • `@ChessBetterBot leaderboard` · `@ChessBetterBot leaderboard dice` · `@ChessBetterBot leaderboard 960` · `@ChessBetterBot leaderboard 3p` · `@ChessBetterBot leaderboard 3pdice`
         • `@ChessBetterBot theme` · `@ChessBetterBot pieces` — pick your board colours and piece set, shown when it's your turn
         """;
@@ -227,13 +227,14 @@ public static partial class Messages
         ? $":tada: Rolled *{roll}* (needed {proposal.Target}+). *Success!* {summary}."
         : $":skull: Rolled *{roll}* (needed {proposal.Target}+). *Failed.* {summary}.";
 
-    public static SlackContent GameOver(GameRecord record, Game game, string pgn, string analysisUrl, string? publicBaseUrl)
+    public static SlackContent GameOver(GameRecord record, Game game, string pgn, string analysisUrl, string? publicBaseUrl, string? ratings = null)
     {
         var description = DescribeResult(record, game);
         var text = $":checkered_flag: {description} *{game.ResultString}*";
+        var ratingLine = ratings is null ? "" : $"\n{ratings}";
         var blocks = new JsonArray
         {
-            Section($"{text}\n<@{record.WhiteId}> (white) vs <@{record.BlackId}> (black) · {MoveCountText(game)}"),
+            Section($"{text}\n<@{record.WhiteId}> (white) vs <@{record.BlackId}> (black) · {MoveCountText(game)}{ratingLine}"),
         };
         if (game.Moves.Count > 0)
         {
