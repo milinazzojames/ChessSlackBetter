@@ -24,7 +24,7 @@ public class DiceGameTests
     public DiceGameTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), new FakeAnalysisLinks(), _judge, _roller, options, TimeProvider.System,
+        _bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), new FakeAnalysisLinks(), _judge, _roller, new FakePhilosopher(), options, TimeProvider.System,
             NullLogger<ChessBotService>.Instance);
     }
 

@@ -75,6 +75,22 @@ public static partial class Messages
 
     public const string Chess960Name = "Chess960";
 
+    public static string ModeName(GameMode mode) => mode switch
+    {
+        GameMode.DiceRoll => "ChessDiceRoll",
+        GameMode.Chess960 => Chess960Name,
+        GameMode.ThreePlayer => ThreePlayerName,
+        GameMode.ThreePlayerDice => ThreePlayerDiceName,
+        _ => "Chess",
+    };
+
+    /// <summary>A quote in its own language, untranslated, then who said it.</summary>
+    public static string Quote(Quotes.Quote quote) =>
+        $":scroll: _{quote.Text}_\n" +
+        (string.IsNullOrWhiteSpace(quote.Attribution)
+            ? $"> _{quote.Language}_"
+            : $"> — {quote.Attribution} · _{quote.Language}_");
+
     public static SlackContent ChallengeCard(
         string challengerId, string opponentId, string whiteId, GameMode mode = GameMode.Standard, int? chess960Number = null)
     {

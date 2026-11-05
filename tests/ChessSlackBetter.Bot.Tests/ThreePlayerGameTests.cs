@@ -24,7 +24,7 @@ public class ThreePlayerGameTests
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
         _bot = new ChessBotService(_slack, new InMemoryGameRepository(), new InMemoryUserRepository(), _games, new FakeAnalysisLinks(), new FakeDiceJudge(),
-            new FakeDiceRoller(), options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
+            new FakeDiceRoller(), new FakePhilosopher(), options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
     }
 
     [Fact]

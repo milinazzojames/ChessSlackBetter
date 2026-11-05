@@ -1,4 +1,5 @@
 using ChessSlackBetter.Bot.Games;
+using ChessSlackBetter.Bot.Quotes;
 using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,13 +18,14 @@ public class ChessBotServiceTests
     private readonly InMemoryGameRepository _games = new();
     private readonly InMemoryUserRepository _users = new();
     private readonly FakeAnalysisLinks _analysis = new();
+    private readonly FakePhilosopher _philosopher = new();
     private readonly ChessBotService _bot;
     private int _ts = 1;
 
     public ChessBotServiceTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(), options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
+        _bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(), _philosopher, options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
     }
 
     [Fact]
@@ -196,6 +198,35 @@ public class ChessBotServiceTests
     }
 
     [Fact]
+    public async Task A_quote_can_follow_a_turn()
+    {
+        var thread = await StartGame();
+        await Say(Alice, "e4", thread);
+        Assert.Contains("White just played e4", _philosopher.Situations.Single());
+        Assert.DoesNotContain(":scroll:", _slack.Posted[^1].Text);
+
+        _philosopher.Next = new Quote("Πάντα ῥεῖ.", "Ancient Greek", "Heraclitus");
+        await Say(Bob, "e5", thread);
+        var quote = _slack.Posted[^1];
+        Assert.Equal(thread, quote.ThreadTs);
+        Assert.Equal(":scroll: _Πάντα ῥεῖ._\n> — Heraclitus · _Ancient Greek_", quote.Text);
+    }
+
+    [Fact]
+    public void Quotes_are_rare_and_fall_back_to_stored_ones_without_an_api_key()
+    {
+        Quote? Ask(double chance) => new Philosopher(
+                Options.Create(new ChessBotOptions { QuoteChance = chance }),
+                Options.Create(new Dice.AnthropicOptions()),
+                NullLogger<Philosopher>.Instance)
+            .MaybeQuoteAsync("Chess. White just played e4.").Result;
+
+        Assert.Null(Ask(0));
+        Assert.Contains(Ask(1), Philosopher.Fallback);
+        Assert.Equal(0.01, new ChessBotOptions().QuoteChance);
+    }
+
+    [Fact]
     public async Task Each_player_can_undo_their_last_move_once()
     {
         var thread = await StartGame();
@@ -292,7 +323,7 @@ public class ChessBotServiceTests
     [Fact]
     public async Task Text_boards_are_used_without_a_public_url()
     {
-        var bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(), Options.Create(new ChessBotOptions()), TimeProvider.System, NullLogger<ChessBotService>.Instance);
+        var bot = new ChessBotService(_slack, _games, _users, new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(), new FakePhilosopher(), Options.Create(new ChessBotOptions()), TimeProvider.System, NullLogger<ChessBotService>.Instance);
         await bot.HandleMessageAsync(new(Channel, Alice, $"<@{FakeSlackApi.BotId}> challenge <@{Bob}> white", NextTs(), null, true));
         var thread = "1000.000100";
         await bot.HandleActionAsync(new(ActionIds.Accept, Bob, Channel, thread));

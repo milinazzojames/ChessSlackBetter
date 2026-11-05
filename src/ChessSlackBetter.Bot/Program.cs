@@ -1,6 +1,7 @@
 using ChessSlackBetter.Bot;
 using ChessSlackBetter.Bot.Dice;
 using ChessSlackBetter.Bot.Games;
+using ChessSlackBetter.Bot.Quotes;
 using ChessSlackBetter.Bot.Rendering;
 using ChessSlackBetter.Bot.Slack;
 using ChessSlackBetter.Bot.Users;
@@ -24,6 +25,7 @@ builder.Services.AddSingleton<BoardRenderer>();
 builder.Services.Configure<AnthropicOptions>(builder.Configuration.GetSection(AnthropicOptions.Section));
 builder.Services.AddSingleton<IDiceJudge, ClaudeDiceJudge>();
 builder.Services.AddSingleton<IDiceRoller, CryptoDiceRoller>();
+builder.Services.AddSingleton<IPhilosopher, Philosopher>();
 builder.Services.AddScoped<ChessBotService>();
 builder.Services.AddSingleton<WorkQueue>();
 builder.Services.AddHostedService<WorkQueueService>();

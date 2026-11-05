@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using ChessSlackBetter.Bot.Dice;
 using ChessSlackBetter.Bot.Games;
+using ChessSlackBetter.Bot.Quotes;
 using ChessSlackBetter.Bot.Slack;
 using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
@@ -146,6 +147,20 @@ public sealed class FakeDiceRoller : IDiceRoller
     public int NextPick { get; set; }
 
     public int Pick(int count) => Math.Min(NextPick, count - 1);
+}
+
+/// <summary>Stays quiet unless a test sets <see cref="Next"/>, so quotes never turn up in other tests.</summary>
+public sealed class FakePhilosopher : IPhilosopher
+{
+    public Quote? Next { get; set; }
+
+    public List<string> Situations { get; } = [];
+
+    public Task<Quote?> MaybeQuoteAsync(string situation, CancellationToken ct = default)
+    {
+        Situations.Add(situation);
+        return Task.FromResult(Next);
+    }
 }
 
 public sealed class FakeAnalysisLinks : IAnalysisLinks
