@@ -146,6 +146,8 @@ public sealed partial class ChessBotService
         {
             await PostBoardAsync(record, game, ct);
         }
+
+        await MaybeQuoteAsync(record, game, ct);
     }
 
     private async Task CancelRollAsync(GameRecord record, string userId, Func<string, Task> reply, CancellationToken ct)

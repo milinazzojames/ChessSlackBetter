@@ -20,7 +20,7 @@ public class Chess960GameTests
     public Chess960GameTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, _games, new InMemoryUserRepository(), new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(),
+        _bot = new ChessBotService(_slack, _games, new InMemoryUserRepository(), new InMemoryThreePlayerRepository(), _analysis, new FakeDiceJudge(), new FakeDiceRoller(), new FakePhilosopher(),
             options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
     }
 

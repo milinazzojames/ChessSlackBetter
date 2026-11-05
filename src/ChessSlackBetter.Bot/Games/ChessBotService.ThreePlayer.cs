@@ -265,6 +265,16 @@ public sealed partial class ChessBotService
         {
             await PostThreePlayerBoardAsync(record, game, ct);
         }
+
+        if (game.Moves.Count > 0)
+        {
+            var last = game.Moves[^1];
+            var situation = $"{(record.WithDice ? Messages.ThreePlayerDiceName : Messages.ThreePlayerName)}, on a triangular board with files a-l and ranks 1-12. " +
+                            (last.IsDiceRoll ? $"{last.Player.Name()} just won or lost a dice gamble. " : $"{last.Player.Name()} just played {last.San}. ") +
+                            string.Concat(game.Eliminations.Select(e => $"{e.Player.Name()} has been knocked out. ")) +
+                            (game.IsOver ? "The game is over." : "");
+            await PostQuoteAsync(record.ChannelId, record.ThreadTs, situation, ct);
+        }
     }
 
     private async Task OfferThreePlayerDrawAsync(ThreePlayerRecord record, string userId, Func<string, Task> reply, CancellationToken ct)

@@ -1,5 +1,6 @@
 using System.Text;
 using ChessSlackBetter.Bot.Dice;
+using ChessSlackBetter.Bot.Quotes;
 using ChessSlackBetter.Bot.Slack;
 using ChessSlackBetter.Bot.Users;
 using ChessSlackBetter.Chess;
@@ -22,6 +23,7 @@ public sealed partial class ChessBotService(
     IAnalysisLinks analysis,
     IDiceJudge judge,
     IDiceRoller dice,
+    IPhilosopher philosopher,
     IOptions<ChessBotOptions> options,
     TimeProvider time,
     ILogger<ChessBotService> logger)
@@ -418,6 +420,8 @@ public sealed partial class ChessBotService(
         {
             await PostBoardAsync(record, game, ct);
         }
+
+        await MaybeQuoteAsync(record, game, ct);
     }
 
     private async Task ResignAsync(GameRecord record, string userId, Func<string, Task> reply, CancellationToken ct)
@@ -754,6 +758,26 @@ public sealed partial class ChessBotService(
         var style = await users.GetPreferencesAsync(record.PlayerFor(game.Current.SideToMove), ct);
         var board = Messages.Board(record, game, Options.PublicBaseUrl, style);
         await slack.PostMessageAsync(new SlackMessage(record.ChannelId, board.Text, board.Blocks, record.ThreadTs), ct);
+    }
+
+    /// <summary>Once in a while, a deep thought after a turn.</summary>
+    private async Task MaybeQuoteAsync(GameRecord record, Game game, CancellationToken ct)
+    {
+        var last = game.Moves[^1];
+        var mover = game.Current.SideToMove == PieceColor.White ? "Black" : "White";
+        var situation = new StringBuilder($"{Messages.ModeName(record.Mode)}. ");
+        situation.Append(last.IsDiceRoll ? $"{mover} just won or lost a dice gamble that changed the board. " : $"{mover} just played {last.San}. ");
+        situation.Append(game.IsOver ? $"The game is over: {game.Outcome}, {game.Termination}. " : "");
+        situation.Append($"Position (FEN): {game.Current.ToFen()}");
+        await PostQuoteAsync(record.ChannelId, record.ThreadTs, situation.ToString(), ct);
+    }
+
+    private async Task PostQuoteAsync(string channelId, string threadTs, string situation, CancellationToken ct)
+    {
+        if (await philosopher.MaybeQuoteAsync(situation, ct) is { } quote)
+        {
+            await slack.PostMessageAsync(new SlackMessage(channelId, Messages.Quote(quote), ThreadTs: threadTs), ct);
+        }
     }
 
     private async Task FinishAsync(GameRecord record, Game game, CancellationToken ct)

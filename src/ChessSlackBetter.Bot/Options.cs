@@ -28,4 +28,7 @@ public sealed class ChessBotOptions
 
     /// <summary>Import finished games to lichess.org so players get a computer-analysis link.</summary>
     public bool ImportFinishedGamesToLichess { get; set; } = true;
+
+    /// <summary>Chance, from 0 to 1, that the bot posts a philosophical quote after a turn.</summary>
+    public double QuoteChance { get; set; } = 0.01;
 }

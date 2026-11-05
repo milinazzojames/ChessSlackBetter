@@ -24,7 +24,7 @@ public class ThreePlayerDiceTests
     public ThreePlayerDiceTests()
     {
         var options = Options.Create(new ChessBotOptions { PublicBaseUrl = "https://chess.example.com" });
-        _bot = new ChessBotService(_slack, new InMemoryGameRepository(), new InMemoryUserRepository(), _games, new FakeAnalysisLinks(), _judge, _roller,
+        _bot = new ChessBotService(_slack, new InMemoryGameRepository(), new InMemoryUserRepository(), _games, new FakeAnalysisLinks(), _judge, _roller, new FakePhilosopher(),
             options, TimeProvider.System, NullLogger<ChessBotService>.Instance);
 
         // White gambles to turn Black's queen into a pawn, risking their own a1 rook.

@@ -11,6 +11,8 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 - Full rules: castling, en passant, promotion, checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Finished games are imported to lichess for computer analysis; PGN export any time
 - `@ChessBetterBot stats`, `@ChessBetterBot leaderboard`, `@ChessBetterBot games`
+- Now and then (1 turn in 100, in every mode) the bot posts a deep quote in a random language, untranslated, sometimes fitting
+  the position. Claude writes it when an API key is set; otherwise it picks from a short built-in list
 
 ## Commands
 
@@ -162,6 +164,7 @@ docker run -p 8080:8080 -v chessbot-data:/data \
 | `ChessBot:DatabasePath` | `chessbot.db` | SQLite file |
 | `ChessBot:AllowMovesWithoutMention` | `true` | Accept bare moves like `e4` from players in a game thread |
 | `ChessBot:ImportFinishedGamesToLichess` | `true` | Import finished games to lichess.org for an analysis link |
+| `ChessBot:QuoteChance` | `0.01` | Chance after each turn that the bot posts a deep quote in a random language (`0` turns it off) |
 | `Anthropic:ApiKey` | | Claude API key for the ChessDiceRoll referee |
 | `Anthropic:Model` | `claude-opus-5-5` | Model used to read dice gambles |
 
