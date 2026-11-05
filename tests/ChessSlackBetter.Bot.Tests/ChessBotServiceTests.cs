@@ -196,6 +196,45 @@ public class ChessBotServiceTests
     }
 
     [Fact]
+    public async Task Each_player_can_undo_their_last_move_once()
+    {
+        var thread = await StartGame();
+        await Mention(Alice, "undo", thread);
+        Assert.Contains("only undo your last move", _slack.Ephemeral[^1].Text);
+
+        await Say(Alice, "e4", thread);
+        await Mention(Bob, "undo", thread);
+        Assert.Contains("only undo your last move", _slack.Ephemeral[^1].Text);
+
+        await Mention(Alice, "undo", thread);
+        Assert.Contains($"<@{Alice}> took back *e4*", _slack.Posted[^2].Text);
+        Assert.Empty((await _games.GetAsync(Channel, thread))!.Moves);
+
+        await Say(Alice, "d4", thread);
+        await Mention(Alice, "undo", thread);
+        Assert.Contains("already used your undo", _slack.Ephemeral[^1].Text);
+
+        // Bob still has an undo of their own, and the game carries on from the right position.
+        await Say(Bob, "d5", thread);
+        await Mention(Bob, "takeback", thread);
+        await Say(Bob, "Nf6", thread);
+        var record = (await _games.GetAsync(Channel, thread))!;
+        Assert.Equal(["d2d4", "g8f6"], record.Moves);
+        Assert.Equal([Alice, Bob], record.UndosUsedBy);
+    }
+
+    [Fact]
+    public async Task Undo_is_only_for_normal_chess()
+    {
+        await Mention(Alice, $"chess960 <@{Bob}> white");
+        var thread = (await _games.GetOpenGamesAsync(Bob)).Single().ThreadTs;
+        await Click(Bob, ActionIds.Accept, thread);
+        await Say(Alice, "g3", thread);
+        await Mention(Alice, "undo", thread);
+        Assert.Contains("only allowed in normal chess", _slack.Ephemeral[^1].Text);
+    }
+
+    [Fact]
     public async Task Abort_only_before_both_players_move_and_does_not_count()
     {
         var thread = await StartGame();

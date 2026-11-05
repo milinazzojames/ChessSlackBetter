@@ -58,6 +58,9 @@ public sealed class GameRecord
 
     public GameState State { get; set; } = GameState.Challenged;
 
+    /// <summary>Players who have used their one undo. Only <see cref="GameMode.Standard"/> games allow undos.</summary>
+    public List<string> UndosUsedBy { get; set; } = [];
+
     /// <summary>Moves in UCI notation, e.g. "e2e4", plus "dice:..." entries for dice rolls.</summary>
     public List<string> Moves { get; set; } = [];
 

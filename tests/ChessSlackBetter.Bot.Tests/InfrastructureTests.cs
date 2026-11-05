@@ -192,11 +192,13 @@ public sealed class SqliteGameRepositoryTests : IDisposable
 
         record.Moves.Add("g1f3");
         record.DrawOfferedBy = null;
+        record.UndosUsedBy.Add("UB");
         await repo.SaveAsync(record);
 
         var loaded = await repo.GetAsync("C1", "1.0");
         Assert.NotNull(loaded);
         Assert.Equal(["e2e4", "e7e5", "g1f3"], loaded.Moves);
+        Assert.Equal(["UB"], loaded.UndosUsedBy);
         Assert.Null(loaded.DrawOfferedBy);
         Assert.Single(await repo.GetOpenGamesAsync("UB"));
         Assert.Empty(await repo.GetFinishedGamesAsync());

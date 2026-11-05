@@ -22,6 +22,7 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 | Game thread | `@ChessBetterBot resign` | Resign |
 | Game thread | `@ChessBetterBot draw` / `decline draw` | Offer, accept or decline a draw |
 | Game thread | `@ChessBetterBot abort` | Cancel before both players have moved (not counted in stats) |
+| Game thread | `@ChessBetterBot undo` | Take back your last move before your opponent replies. One undo per player, normal chess only |
 | Game thread | `@ChessBetterBot board` / `pgn` | Re-post the board / export the game |
 | Anywhere | `@ChessBetterBot chess960 @user [white\|black]` | Challenge someone to [Chess960](#chess960) |
 | Anywhere | `@ChessBetterBot threeplayerchess @user @user` | Challenge two people to [Three-Player Chess](#three-player-chess) |
