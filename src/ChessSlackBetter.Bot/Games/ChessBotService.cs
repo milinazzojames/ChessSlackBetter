@@ -408,9 +408,11 @@ public sealed partial class ChessBotService(
             await CloseProposalAsync(record, pending, "_Withdrawn: they moved instead._", ct);
         }
 
+        var ruleNotes = record.Mode == GameMode.DiceRoll ? FireRules(record, game, userId) : [];
         record.SyncFrom(game);
         record.DrawOfferedBy = null;
         await SaveAsync(record, ct);
+        await PostRuleNotesAsync(record, ruleNotes, ct);
 
         if (game.IsOver)
         {

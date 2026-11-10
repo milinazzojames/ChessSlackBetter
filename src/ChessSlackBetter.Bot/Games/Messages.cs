@@ -38,13 +38,16 @@ public static partial class Messages
         • `@ChessBetterBot board` — show the board again · `@ChessBetterBot pgn` — export / analyse
 
         *ChessDiceRoll* :game_die:
-        • `@ChessBetterBot diceroll @someone` — normal chess, plus gambles
+        • `@ChessBetterBot diceroll @someone` (or `gambit @someone`) — normal chess, plus gambles
         • On your turn, instead of moving, describe a gamble with a reward *and* a penalty:
           `@ChessBetterBot roll turn my e4 pawn into a bishop, if I fail I lose the pawn`
         • The bot works out the fair d20 roll; you then press *Roll* (or say `yes`) or *Cancel* (`no`)
         • Rolling uses your turn. 5 rolls per player per game; cancelled rolls don't count
         • Your opponent can veto one gamble per game. Dice can't touch kings or set up checkmate within two moves
         • Random gambles work too, e.g. `turn a random one of their pieces into a pawn, if I fail I lose my knight`
+        • So do lasting rules, e.g. `every turn I gain a pawn on a random empty square, if I fail I lose my queen`
+        • Anything goes, as long as the penalty really costs you. Say `Jimmy gambit` to sacrifice everything but
+          your king and the pieces shielding it
 
         *Chess960* :twisted_rightwards_arrows:
         • `@ChessBetterBot chess960 @someone` (or `challenge @someone 960`) — Fischer Random: normal rules, but the
@@ -187,6 +190,11 @@ public static partial class Messages
                 $":game_die: Rolls left: <@{record.WhiteId}> {dice.RollsLeft(record.WhiteId)} · <@{record.BlackId}> {dice.RollsLeft(record.BlackId)}" +
                 $"  ·  Vetoes left: <@{record.WhiteId}> {dice.VetoesLeft(record.WhiteId)} · <@{record.BlackId}> {dice.VetoesLeft(record.BlackId)}\n" +
                 "Move, or gamble: `@ChessBetterBot roll <what you want>, if I fail <penalty>`"));
+            if (dice.Rules.Count > 0)
+            {
+                blocks.Add(Context(":repeat: *Rules in play:*\n" + string.Join('\n', dice.Rules.Select(r =>
+                    $"• {r.Summary} _(<@{r.OwnerId}>'s gamble{(r.TimesLeft is { } left ? $", {left} more" : "")})_"))));
+            }
         }
         else if (record.Chess960Number is { } number)
         {
@@ -328,12 +336,14 @@ public static partial class Messages
             url += $"&pieces={Uri.EscapeDataString(pieces)}";
         }
 
-        return game.LastMove switch
+        var highlights = (game.LastMove?.Edits ?? []).Concat(game.LastMove?.After ?? [])
+            .Select(e => Square.Name(e.Square)).Distinct().ToList();
+        if (game.LastMove is { Edits: null } move)
         {
-            { Edits: { } edits } => $"{url}&hl={string.Join(',', edits.Select(e => Square.Name(e.Square)))}",
-            { } last => $"{url}&last={last.Move.ToUci()}",
-            _ => url,
-        };
+            url += $"&last={move.Move.ToUci()}";
+        }
+
+        return highlights.Count > 0 ? $"{url}&hl={string.Join(',', highlights)}" : url;
     }
 
     private static JsonNode BoardBlock(Game game, PieceColor perspective, string? publicBaseUrl, Users.UserPreferences? style = null)

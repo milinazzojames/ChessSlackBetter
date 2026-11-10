@@ -42,6 +42,10 @@ public class CommandParserTests
         Assert.Equal(GameMode.DiceRoll, challenge.Mode);
         Assert.Equal(PieceColor.Black, challenge.ChallengerColor);
         Assert.Equal(GameMode.Standard, Assert.IsType<ChallengeCommand>(CommandParser.Parse("challenge <@UBOB>")).Mode);
+        Assert.Equal(GameMode.DiceRoll, Assert.IsType<ChallengeCommand>(CommandParser.Parse("gambit <@UBOB>")).Mode);
+        Assert.Equal(GameMode.DiceRoll, Assert.IsType<ChallengeCommand>(CommandParser.Parse("challenge <@UBOB> gambit")).Mode);
+        Assert.Equal(GameMode.DiceRoll, Assert.IsType<LeaderboardCommand>(CommandParser.Parse("leaderboard gambit")).Mode);
+        Assert.True(Assert.IsType<ThreePlayerChallengeCommand>(CommandParser.Parse("3pgambit <@UBOB> <@UCAT>")).WithDice);
 
         var roll = Assert.IsType<RollRequestCommand>(CommandParser.Parse("roll turn my e4 pawn into a bishop, if I fail I lose it"));
         Assert.Equal("turn my e4 pawn into a bishop, if I fail I lose it", roll.Request);

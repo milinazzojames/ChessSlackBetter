@@ -18,21 +18,52 @@ public static class DiceRules
         _ => 0,
     };
 
-    /// <summary>Applies the effects in order to a copy of the board and returns the squares that changed.</summary>
+    /// <summary>A random empty square (never rank 1 or 8 when a pawn is placed there).</summary>
+    public const string RandomEmpty = "random_empty";
+
+    /// <summary>A random white piece other than the king.</summary>
+    public const string RandomWhite = "random_white";
+
+    /// <summary>A random black piece other than the king.</summary>
+    public const string RandomBlack = "random_black";
+
+    /// <summary>A random piece of either colour other than a king.</summary>
+    public const string RandomPiece = "random_piece";
+
+    /// <summary>
+    /// Applies the effects in order to a copy of the board and returns the squares that changed. Squares may be
+    /// random selectors (<see cref="RandomEmpty"/> and friends), resolved with <paramref name="pick"/>, which
+    /// returns a uniformly random index below its argument.
+    /// </summary>
     public static bool TryBuildEdits(
         Position position,
         IReadOnlyList<DiceEffect> effects,
         [NotNullWhen(true)] out List<SquareEdit>? edits,
-        [NotNullWhen(false)] out string? error)
+        [NotNullWhen(false)] out string? error,
+        Func<int, int>? pick = null)
     {
+        pick ??= Random.Shared.Next;
         edits = null;
         var board = Enumerable.Range(0, 64).Select(sq => position[sq]).ToArray();
 
         foreach (var effect in effects)
         {
-            if (!Square.TryParse(effect.Square, out var square))
+            if (effect.Type.Equals(JimmyGambit, StringComparison.OrdinalIgnoreCase))
             {
-                error = $"`{effect.Square}` isn't a square.";
+                if (!TryParseColor(effect.Color, out var side))
+                {
+                    error = "A Jimmy gambit needs the colour of the side sacrificing.";
+                    return false;
+                }
+
+                ApplyJimmyGambit(board, side);
+                continue;
+            }
+
+            var placesPawn = effect.Type.Equals("add", StringComparison.OrdinalIgnoreCase) &&
+                             effect.Piece.Equals("pawn", StringComparison.OrdinalIgnoreCase);
+            if (!TryResolveSquare(board, effect.Square, placesPawn, pick, out var square, out error))
+            {
                 return false;
             }
 
@@ -93,9 +124,10 @@ public static class DiceRules
                         return false;
                     }
 
-                    if (!Square.TryParse(effect.ToSquare, out var to))
+                    var emptied = (Piece[])board.Clone();
+                    emptied[square] = Piece.Empty;
+                    if (!TryResolveSquare(emptied, effect.ToSquare, current.Type == PieceType.Pawn, pick, out var to, out error))
                     {
-                        error = $"`{effect.ToSquare}` isn't a square.";
                         return false;
                     }
 
@@ -115,6 +147,138 @@ public static class DiceRules
             .ToList();
         error = null;
         return true;
+    }
+
+    private static bool TryResolveSquare(
+        Piece[] board,
+        string text,
+        bool placesPawn,
+        Func<int, int> pick,
+        out int square,
+        [NotNullWhen(false)] out string? error)
+    {
+        error = null;
+        if (Square.TryParse(text, out square))
+        {
+            return true;
+        }
+
+        bool NotKing(int sq) => !board[sq].IsEmpty && board[sq].Type != PieceType.King;
+        var candidates = Enumerable.Range(0, 64).Where(text.ToLowerInvariant() switch
+        {
+            RandomEmpty => sq => board[sq].IsEmpty && !(placesPawn && Square.Rank(sq) is 0 or 7),
+            RandomWhite => sq => NotKing(sq) && board[sq].Color == PieceColor.White,
+            RandomBlack => sq => NotKing(sq) && board[sq].Color == PieceColor.Black,
+            RandomPiece => NotKing,
+            _ => _ => false,
+        }).ToList();
+
+        if (candidates.Count == 0)
+        {
+            error = text.ToLowerInvariant() is RandomEmpty or RandomWhite or RandomBlack or RandomPiece
+                ? $"There's no square to pick for `{text}`."
+                : $"`{text}` isn't a square.";
+            return false;
+        }
+
+        square = candidates[pick(candidates.Count)];
+        return true;
+    }
+
+    /// <summary>
+    /// Rough value of a passive rule to <paramref name="player"/>, in pawns: the average material one firing
+    /// gains (sampled, since squares may be random) times the firings expected over the next stretch of the game.
+    /// </summary>
+    public static double EstimateRuleValue(Position position, DiceRuleSpec rule, PieceColor player)
+    {
+        const int samples = 24;
+        var random = new Random(12345);
+        var deltas = new List<int>();
+        for (var i = 0; i < samples; i++)
+        {
+            if (TryBuildEdits(position, rule.Effects, out var edits, out _, random.Next))
+            {
+                deltas.Add(MaterialDelta(position, edits, player));
+            }
+        }
+
+        if (deltas.Count == 0)
+        {
+            return 0;
+        }
+
+        // Look ahead about ten of each player's turns; that's most of a typical dice game.
+        var turns = rule.Trigger == RuleTriggers.EveryTurn ? 20.0 : 10.0;
+        var firings = turns / Math.Max(1, rule.Every);
+        if (rule.Times > 0)
+        {
+            firings = Math.Min(firings, rule.Times);
+        }
+
+        return deltas.Average() * firings;
+    }
+
+    /// <summary>Effect type for the Jimmy gambit (see <see cref="ApplyJimmyGambit"/>).</summary>
+    public const string JimmyGambit = "jimmy_gambit";
+
+    private static readonly (int File, int Rank)[] Orthogonals = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+    private static readonly (int File, int Rank)[] Diagonals = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+
+    /// <summary>
+    /// The Jimmy gambit: <paramref name="side"/> sacrifices every piece except its king and the pieces shielding
+    /// that king from check. A piece is a shield when it is the nearest piece to the king along a line and the next
+    /// enemy piece behind it on that line is a rook, bishop or queen that would attack the king along it once the
+    /// sacrificed pieces are gone. Knight and pawn checks can't be blocked, so they never keep a piece.
+    /// </summary>
+    public static void ApplyJimmyGambit(Piece[] board, PieceColor side)
+    {
+        var king = Array.FindIndex(board, p => p.Type == PieceType.King && p.Color == side);
+        var keep = new HashSet<int>();
+        if (king >= 0)
+        {
+            foreach (var (dir, diagonal) in Orthogonals.Select(d => (d, false)).Concat(Diagonals.Select(d => (d, true))))
+            {
+                if (ShieldOnLine(board, king, dir, diagonal, side) is { } shield)
+                {
+                    keep.Add(shield);
+                }
+            }
+        }
+
+        for (var sq = 0; sq < 64; sq++)
+        {
+            if (!board[sq].IsEmpty && board[sq].Color == side && board[sq].Type != PieceType.King && !keep.Contains(sq))
+            {
+                board[sq] = Piece.Empty;
+            }
+        }
+    }
+
+    private static int? ShieldOnLine(Piece[] board, int king, (int File, int Rank) dir, bool diagonal, PieceColor side)
+    {
+        int? shield = null;
+        var (file, rank) = (Square.File(king) + dir.File, Square.Rank(king) + dir.Rank);
+        for (; Square.IsOnBoard(file, rank); file += dir.File, rank += dir.Rank)
+        {
+            var piece = board[Square.At(file, rank)];
+            if (piece.IsEmpty)
+            {
+                continue;
+            }
+
+            if (piece.Color == side)
+            {
+                // The nearest own piece is the candidate shield; own pieces beyond it are sacrificed, so look past them.
+                shield ??= Square.At(file, rank);
+                continue;
+            }
+
+            var slides = piece.Type == PieceType.Queen || piece.Type == (diagonal ? PieceType.Bishop : PieceType.Rook);
+            return slides ? shield : null;
+        }
+
+        return null;
     }
 
     /// <summary>Change in (own material − opponent material) for <paramref name="player"/>.</summary>

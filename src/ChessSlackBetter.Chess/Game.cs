@@ -28,14 +28,28 @@ public enum Termination
 /// One turn of the game: a normal move, or (in dice games) a set of board edits in place of a move,
 /// in which case <see cref="Edits"/> is set and <see cref="Move"/> is meaningless.
 /// </summary>
-public sealed record PlayedMove(Move Move, string San, IReadOnlyList<SquareEdit>? Edits = null)
+/// <param name="After">
+/// Board edits made after the turn without passing it, by passive dice rules that fire at the end of a turn.
+/// </param>
+public sealed record PlayedMove(Move Move, string San, IReadOnlyList<SquareEdit>? Edits = null, IReadOnlyList<SquareEdit>? After = null)
 {
     public const string DicePrefix = "dice:";
 
+    /// <summary>Separates a turn's token from the edits passive rules made after it.</summary>
+    public const char AfterSeparator = '|';
+
     public bool IsDiceRoll => Edits is not null;
 
-    /// <summary>Storage form: UCI for moves ("e2e4"), "dice:e4=B,d5=-" for edits.</summary>
-    public string ToToken() => Edits is null ? Move.ToUci() : DicePrefix + string.Join(',', Edits);
+    /// <summary>
+    /// Storage form: UCI for moves ("e2e4"), "dice:e4=B,d5=-" for edits, followed by "|c5=P" when rules fired after.
+    /// </summary>
+    public string ToToken() =>
+        (Edits is null ? Move.ToUci() : DicePrefix + string.Join(',', Edits)) +
+        (After is { Count: > 0 } ? AfterSeparator + string.Join(',', After) : "");
+
+    /// <summary>The SAN plus, when rules fired after the turn, a comment such as "{rule c5=P}".</summary>
+    public string SanWithRules =>
+        After is { Count: > 0 } ? San + " {rule " + string.Join(' ', After) + "}" : San;
 }
 
 /// <summary>A game from a starting position (normally the standard one): its moves and how (or whether) it ended.</summary>
@@ -70,19 +84,79 @@ public sealed class Game
     public static Game Replay(IEnumerable<string> tokens, Position? start = null)
     {
         var game = new Game(start);
-        foreach (var token in tokens)
+        foreach (var stored in tokens)
         {
+            var parts = stored.Split(PlayedMove.AfterSeparator);
+            var token = parts[0];
             string? error;
             var ok = token.StartsWith(PlayedMove.DicePrefix, StringComparison.Ordinal)
-                ? game.TryApplyEdits(token[PlayedMove.DicePrefix.Length..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(SquareEdit.Parse).ToList(), out error)
+                ? game.TryApplyEdits(ParseEdits(token[PlayedMove.DicePrefix.Length..]), out error)
                 : game.TryPlay(token, out _, out error);
+            if (ok && parts.Length > 1)
+            {
+                ok = game.TryApplyAfterTurn(ParseEdits(parts[1]), out error);
+            }
+
             if (!ok)
             {
-                throw new FormatException($"Stored move '{token}' is invalid: {error}");
+                throw new FormatException($"Stored move '{stored}' is invalid: {error}");
             }
         }
 
         return game;
+    }
+
+    private static List<SquareEdit> ParseEdits(string text) =>
+        text.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(SquareEdit.Parse).ToList();
+
+    /// <summary>
+    /// Checks edits a passive rule wants to make after a turn, with the same side still to move: kings can't be
+    /// touched, pawns can't sit on their promotion rank, the player who just moved can't be left in check, and the
+    /// player to move must still have a legal move.
+    /// </summary>
+    public static bool ValidateAfterTurnEdits(Position position, IReadOnlyList<SquareEdit> edits, [NotNullWhen(false)] out string? error)
+    {
+        if (!ValidatePieces(position, edits, out error))
+        {
+            return false;
+        }
+
+        var after = position.WithEdits(edits, passTurn: false);
+        if (after.IsInCheck(position.SideToMove.Opponent()))
+        {
+            error = "That would leave the king of the player who just moved in check.";
+            return false;
+        }
+
+        if (after.GenerateLegalMoves().Count == 0)
+        {
+            error = after.IsInCheck() ? "Dice can't deliver checkmate." : "That would stalemate the player to move.";
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Applies a passive rule's edits after the last turn; the same side stays to move.</summary>
+    public bool TryApplyAfterTurn(IReadOnlyList<SquareEdit> edits, [NotNullWhen(false)] out string? error)
+    {
+        if (IsOver || _moves.Count == 0)
+        {
+            error = IsOver ? "The game is already over." : "Rules can only fire after a turn.";
+            return false;
+        }
+
+        if (!ValidateAfterTurnEdits(Current, edits, out error))
+        {
+            return false;
+        }
+
+        var last = _moves[^1];
+        _moves[^1] = last with { After = [.. last.After ?? [], .. edits] };
+        Current = Current.WithEdits(edits, passTurn: false);
+        _repetitionKeys[^1] = Current.RepetitionKey();
+        DetectAutomaticEnd();
+        return true;
     }
 
     /// <summary>
@@ -91,6 +165,31 @@ public sealed class Game
     /// still have a legal move (no checkmate or stalemate by dice). No edits at all is fine: the turn just passes.
     /// </summary>
     public static bool ValidateEdits(Position position, IReadOnlyList<SquareEdit> edits, [NotNullWhen(false)] out string? error)
+    {
+        if (!ValidatePieces(position, edits, out error))
+        {
+            return false;
+        }
+
+        var after = position.WithEdits(edits);
+        if (after.IsInCheck(position.SideToMove))
+        {
+            error = "That would leave your own king in check.";
+            return false;
+        }
+
+        if (after.GenerateLegalMoves().Count == 0)
+        {
+            error = after.IsInCheck()
+                ? "Dice can't deliver checkmate."
+                : "That would stalemate your opponent.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidatePieces(Position position, IReadOnlyList<SquareEdit> edits, [NotNullWhen(false)] out string? error)
     {
         error = null;
         foreach (var edit in edits)
@@ -108,21 +207,6 @@ public sealed class Game
                 error = "Pawns can't be placed on the rank where they would promote.";
                 return false;
             }
-        }
-
-        var after = position.WithEdits(edits);
-        if (after.IsInCheck(position.SideToMove))
-        {
-            error = "That would leave your own king in check.";
-            return false;
-        }
-
-        if (after.GenerateLegalMoves().Count == 0)
-        {
-            error = after.IsInCheck()
-                ? "Dice can't deliver checkmate."
-                : "That would stalemate your opponent.";
-            return false;
         }
 
         return true;
@@ -205,7 +289,7 @@ public sealed class Game
                 sb.Append(' ');
             }
 
-            sb.Append(_moves[i].San);
+            sb.Append(_moves[i].SanWithRules);
         }
 
         return sb.ToString();

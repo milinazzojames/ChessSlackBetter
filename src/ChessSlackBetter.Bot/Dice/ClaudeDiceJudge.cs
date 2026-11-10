@@ -41,6 +41,11 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         - remove: the piece on `square` is removed
         - add: a new `piece` of `color` appears on the empty `square`
         - move: the piece on `square` teleports to `to_square`, capturing anything there
+        - jimmy_gambit: the "Jimmy gambit". The side of `color` sacrifices every piece except its king and the
+          pieces shielding its king from check; code works out which pieces those are. Use it whenever a player
+          says "Jimmy gambit" (as the reward, the penalty, or both), with `color` set to the side sacrificing
+          (the requester unless they say otherwise) and `square` empty. Don't list the removals yourself.
+          A Jimmy gambit is a valid downside, and one inflicted on the opponent doesn't touch their king.
         Leave unused fields as empty strings. Teleports don't have to be legal chess moves.
 
         Each outcome is a list of options, each with its own effects and summary. Usually there is exactly one.
@@ -48,19 +53,47 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         every possibility as its own option; code picks one uniformly at random when the dice are rolled (repeat an
         option to weight it). An option's summary says exactly what happens, e.g. "Black's c6 knight becomes a pawn".
 
-        Be generous. Players may make silly, pointless or self-defeating gambles, and that's part of the fun. If
-        winning would change nothing (e.g. "move my d2 pawn to d2"), accept it with an empty effects list. Read loose
-        wording charitably and pick the most sensible meaning rather than asking them to clarify; if they name the
-        wrong square for a piece but it's clear which piece they mean, use the right one.
+        Random squares: in any effect, `square` (and `to_square` for a move) may be a random selector instead of a
+        square name, and code picks one with a real random number each time the effect is applied:
+        - random_empty: a random empty square (code never puts a pawn on rank 1 or 8 this way)
+        - random_white / random_black: a random piece of that colour, never the king
+        - random_piece: a random piece of either colour, never a king
+        E.g. "a pawn appears on a random empty square" is {type: add, square: random_empty, piece: pawn, color: ...}.
+        For a one-off random outcome you may use a selector or list the possibilities as options, as you prefer.
+
+        Passive rules: an option may also add lasting rules in `rules`, for requests like "every turn I gain a pawn
+        on a random empty square", "every 3 turns a random black piece turns into a pawn" or "for the next 5 of my
+        opponent's turns, one of their pieces moves to a random square". A rule fires at the end of each matching
+        turn, starting after the turn the gamble is rolled, and applies its effects without using anyone's turn:
+        - trigger: own_turn (after each turn the requester takes), opponent_turn (after each opponent turn) or
+          every_turn (after every turn by either player)
+        - every: fire on every Nth matching turn (1 = each one)
+        - times: how many times it fires before it expires; 0 = for the rest of the game
+        - effects: as above, usually with random selectors so each firing differs
+        - summary: e.g. "Every white turn, a white pawn appears on a random empty square"
+        "Every turn" from a player usually means each of their own turns (own_turn) unless they clearly mean both
+        players' turns. Rules belong to the requester even when they come from the failure outcome (a penalty such
+        as "if I fail, my opponent gains a pawn every turn" is a rule whose effects add pieces of the opponent's
+        colour, triggered by the opponent's turns). If a firing would be illegal (no empty square, a king left in
+        check, checkmate or a forced mate), code just skips that firing.
+        Leave `rules` empty for one-off gambles.
+
+        This is a chaos mode: anything the players can dream up should happen if the board can show it. Be generous
+        and creative. Players may make silly, pointless, huge or self-defeating gambles, and that's the fun. If
+        winning would change nothing, accept it with empty effects. Read loose wording charitably and pick the most
+        sensible meaning rather than asking them to clarify; if they name the wrong square for a piece but it's
+        clear which piece they mean, use the right one. If a request can't be shown on the board literally (e.g.
+        "my knights move like queens", "my opponent skips a turn"), build the closest version you can from effects
+        and rules (e.g. an extra knight, or a rule that teleports a random enemy piece) and say so in the message.
+        Code enforces the hard limits by itself: kings are never added, removed, changed or moved, and a pawn that
+        would land on its promotion rank (rank 8 for white, rank 1 for black) should be a queen instead.
 
         Only set accepted to false, with a short friendly message saying how to fix it, when:
         - the request doesn't say what happens if the roll fails (ask them to add a downside),
-        - the downside doesn't cost the requester anything or even helps them (e.g. "if I lose, remove my
-          opponent's queen"),
-        - it would touch, capture, create or move a king,
-        - winning would checkmate the opponent straight away or set up a forced checkmate within two moves,
-        - it would put a pawn on the rank where it promotes (rank 8 for a white pawn, rank 1 for a black pawn),
-        - it has nothing to do with this chess board.
+        - the downside doesn't really cost the requester anything, or is just a hit to the opponent (e.g. "add a
+          queen for me, else remove my opponent's queen" has no real penalty),
+        - winning would checkmate the opponent straight away or leave them within two moves of a forced checkmate,
+        - there's no way at all to express it with board effects and rules.
         Otherwise follow the player's wording closely and don't invent extra effects.
 
         success_summary and failure_summary: short plain English for the gamble as a whole, e.g. "Your e4 pawn
@@ -70,6 +103,8 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         (pawn 1, knight 3, bishop 3, rook 5, queen 9) for each outcome, averaged over its options. Positive means good for the requester.
         Usually between -1 and 1; go up to +/-3 only for big tactical consequences, such as a new piece immediately
         forking or winning the queen, or a removal that exposes the requester's king. Use 0 when material says it all.
+        Code already prices the material a passive rule adds or removes over the coming turns, so the bonus only
+        covers what that misses (e.g. pawns appearing deep in enemy territory are worth more than their material).
 
         reasoning: one short sentence on what matters for the odds.
         message: if accepted, a one-line restatement of the gamble; if rejected, why and how to fix it.
@@ -80,7 +115,7 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
-    private static readonly Dictionary<string, JsonElement> Schema = BuildSchema(["", "white", "black"]);
+    private static readonly Dictionary<string, JsonElement> Schema = BuildSchema(["", "white", "black"], ["transform", "remove", "add", "move", DiceRules.JimmyGambit], withRules: true);
 
     /// <summary>
     /// The three-player board differs: square names, three colours, two opponents, and where pawns promote.
@@ -102,11 +137,14 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         rank (a white pawn can't go on rank 8 or 12, a black pawn on rank 1 or 12, a red pawn on rank 1 or 8). Instead
         of the two-move rule above: refuse a gamble whose win would checkmate an opponent straight away.
 
+        Three-player games don't have passive rules, random selectors or the Jimmy gambit (jimmy_gambit): use
+        exact squares, list random possibilities as options, and reject requests that need a lasting rule.
+
         Positional bonuses are still from the requester's point of view. Code already counts damage to one opponent
         as worth half as much as your own gain, because it also helps the third player, so don't adjust for that.
         """;
 
-    private static readonly Dictionary<string, JsonElement> ThreePlayerSchema = BuildSchema(["", "white", "black", "red"]);
+    private static readonly Dictionary<string, JsonElement> ThreePlayerSchema = BuildSchema(["", "white", "black", "red"], ["transform", "remove", "add", "move"], withRules: false);
 
     public Task<DiceRuling> JudgeAsync(Position position, PieceColor requester, string request, CancellationToken ct = default) =>
         AskAsync(SystemPrompt, Schema, DescribeBoard(position, requester, request), request, ct);
@@ -206,14 +244,14 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         return sb.ToString();
     }
 
-    private static Dictionary<string, JsonElement> BuildSchema(string[] colors)
+    private static Dictionary<string, JsonElement> BuildSchema(string[] colors, string[] effectTypes, bool withRules)
     {
         var effect = new
         {
             type = "object",
             properties = new
             {
-                type = new { type = "string", @enum = new[] { "transform", "remove", "add", "move" } },
+                type = new { type = "string", @enum = effectTypes },
                 square = new { type = "string" },
                 to_square = new { type = "string" },
                 piece = new { type = "string", @enum = new[] { "", "pawn", "knight", "bishop", "rook", "queen" } },
@@ -223,17 +261,45 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
             additionalProperties = false,
         };
 
-        var option = new
+        var rule = new
         {
             type = "object",
             properties = new
             {
+                trigger = new { type = "string", @enum = RuleTriggers.All },
+                every = new { type = "integer" },
+                times = new { type = "integer" },
                 effects = new { type = "array", items = effect },
                 summary = new { type = "string" },
             },
-            required = new[] { "effects", "summary" },
+            required = new[] { "trigger", "every", "times", "effects", "summary" },
             additionalProperties = false,
         };
+
+        object option = withRules
+            ? new
+            {
+                type = "object",
+                properties = new
+                {
+                    effects = new { type = "array", items = effect },
+                    summary = new { type = "string" },
+                    rules = new { type = "array", items = rule },
+                },
+                required = new[] { "effects", "summary", "rules" },
+                additionalProperties = false,
+            }
+            : new
+            {
+                type = "object",
+                properties = new
+                {
+                    effects = new { type = "array", items = effect },
+                    summary = new { type = "string" },
+                },
+                required = new[] { "effects", "summary" },
+                additionalProperties = false,
+            };
 
         return new Dictionary<string, JsonElement>
         {

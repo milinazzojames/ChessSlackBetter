@@ -57,8 +57,8 @@ public sealed partial class ChessBotService
             return;
         }
 
-        if (!TryPrepareOutcomes(game.Current, ruling.SuccessOptions, ruling.SuccessSummary, "If you win", out var successOutcomes, out var error) ||
-            !TryPrepareOutcomes(game.Current, ruling.FailureOptions, ruling.FailureSummary, "If you lose", out var failureOutcomes, out error))
+        if (!TryPrepareOutcomes(game.Current, ruling.SuccessOptions, ruling.SuccessSummary, "If you win", dice.Pick, out var successOutcomes, out var error) ||
+            !TryPrepareOutcomes(game.Current, ruling.FailureOptions, ruling.FailureSummary, "If you lose", dice.Pick, out var failureOutcomes, out error))
         {
             await reply($":game_die: I can't set up that gamble. {error}");
             return;
@@ -68,7 +68,7 @@ public sealed partial class ChessBotService
         var player = record.ColorOf(userId);
         var gain = Math.Max(0, AverageMaterial(game.Current, successOutcomes, player) + ClampBonus(ruling.SuccessPositionalBonus));
         var loss = -(AverageMaterial(game.Current, failureOutcomes, player) + ClampBonus(ruling.FailurePositionalBonus));
-        if (loss <= 0 || failureOutcomes.Any(o => o.Edits.Count == 0))
+        if (loss <= 0 || failureOutcomes.Any(o => o.ChangesNothing))
         {
             await reply(":game_die: Losing has to cost you something. Add a real penalty, e.g. `…and if I fail I lose my knight`.");
             return;
@@ -131,12 +131,21 @@ public sealed partial class ChessBotService
         var outcome = Messages.DiceRollOutcome(proposal, roll, success, picked.Summary);
         record.Dice.RollsUsed[userId] = record.Dice.RollsUsed.GetValueOrDefault(userId) + 1;
         record.Dice.Log.Add(new DiceRollResult(userId, proposal.Request, proposal.Target, roll, success, picked.Summary));
+
+        // Rules already in play fire for this turn; the new ones start with the next matching turn.
+        var ruleNotes = FireRules(record, game, userId);
+        if (!game.IsOver)
+        {
+            record.Dice.Rules.AddRange((picked.Rules ?? []).Select(spec => PassiveRule.From(spec, userId)));
+        }
+
         record.SyncFrom(game);
         record.DrawOfferedBy = null;
         await SaveAsync(record, ct);
 
         await CloseProposalAsync(record, proposal, outcome, ct);
         await slack.PostMessageAsync(new SlackMessage(record.ChannelId, $"<@{userId}> {outcome}", ThreadTs: record.ThreadTs), ct);
+        await PostRuleNotesAsync(record, ruleNotes, ct);
 
         if (game.IsOver)
         {
@@ -224,6 +233,7 @@ public sealed partial class ChessBotService
         IReadOnlyList<DiceOption> options,
         string overallSummary,
         string label,
+        Func<int, int> pick,
         out List<DiceOutcome> outcomes,
         out string? error)
     {
@@ -232,10 +242,11 @@ public sealed partial class ChessBotService
         string? firstError = null;
         foreach (var option in options)
         {
-            if (TryPrepareOption(position, option.Effects, out var edits, out var optionError))
+            if (TryPrepareOption(position, option, pick, out var edits, out var optionError))
             {
                 var summary = string.IsNullOrWhiteSpace(option.Summary) ? overallSummary : option.Summary;
-                outcomes.Add(new DiceOutcome(edits.Select(e => e.ToString()).ToList(), summary));
+                var rules = option.Rules is { Count: > 0 } r ? r.ToList() : null;
+                outcomes.Add(new DiceOutcome(edits.Select(e => e.ToString()).ToList(), summary, rules));
             }
             else
             {
@@ -257,10 +268,10 @@ public sealed partial class ChessBotService
         return false;
     }
 
-    private static bool TryPrepareOption(Position position, IReadOnlyList<DiceEffect> effects, out List<SquareEdit> edits, out string? error)
+    private static bool TryPrepareOption(Position position, DiceOption option, Func<int, int> pick, out List<SquareEdit> edits, out string? error)
     {
         edits = [];
-        if (!DiceRules.TryBuildEdits(position, effects, out var built, out error) ||
+        if (!DiceRules.TryBuildEdits(position, option.Effects, out var built, out error, pick) ||
             !Game.ValidateEdits(position, built, out error))
         {
             return false;
@@ -273,13 +284,138 @@ public sealed partial class ChessBotService
             return false;
         }
 
+        // A rule has to be able to fire at least sometimes; one that never could is a mistake by the referee.
+        foreach (var rule in option.Rules ?? [])
+        {
+            if (!CanEverFire(position.WithEdits(built), rule, out error))
+            {
+                error = $"The rule \"{rule.Summary}\" can't work: {error}";
+                return false;
+            }
+        }
+
         edits = built;
         return true;
     }
 
+    private static bool CanEverFire(Position position, DiceRuleSpec rule, out string? error)
+    {
+        error = "it has no effects.";
+        if (rule.Effects.Count == 0)
+        {
+            return false;
+        }
+
+        var random = new Random(4321);
+        for (var i = 0; i < 24; i++)
+        {
+            if (DiceRules.TryBuildEdits(position, rule.Effects, out var edits, out error, random.Next) &&
+                ValidatePieceEdits(position, edits, out error))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Just the piece checks (no kings, no pawns on their promotion rank), whoever is to move.</summary>
+    private static bool ValidatePieceEdits(Position position, List<SquareEdit> edits, out string? error)
+    {
+        error = edits.Any(e => position[e.Square].Type == PieceType.King || e.Piece.Type == PieceType.King)
+            ? "kings can't be changed by dice."
+            : edits.Any(e => e.Piece.Type == PieceType.Pawn && Square.Rank(e.Square) == (e.Piece.Color == PieceColor.White ? 7 : 0))
+                ? "pawns can't be placed on the rank where they would promote."
+                : null;
+        return error is null;
+    }
+
+    /// <summary>Average material change plus the expected value of any passive rules the outcome brings in.</summary>
     private static double AverageMaterial(Position position, List<DiceOutcome> outcomes, PieceColor player) =>
-        outcomes.Average(o => DiceRules.MaterialDelta(position, o.Edits.Select(SquareEdit.Parse), player));
+        outcomes.Average(o =>
+        {
+            var edits = o.Edits.Select(SquareEdit.Parse).ToList();
+            var after = position.WithEdits(edits);
+            return DiceRules.MaterialDelta(position, edits, player) +
+                   (o.Rules ?? []).Sum(rule => DiceRules.EstimateRuleValue(after, rule, player));
+        });
 
     private static double ClampBonus(double bonus) =>
         Math.Clamp(bonus, -DiceRules.MaxPositionalBonus, DiceRules.MaxPositionalBonus);
+
+    /// <summary>How many times a rule tries random picks before skipping a firing.</summary>
+    private const int RuleFiringAttempts = 8;
+
+    /// <summary>
+    /// Fires the passive rules that match the turn <paramref name="moverId"/> just took, editing the board
+    /// without passing the turn. Returns a line for each rule that fired or had to skip.
+    /// </summary>
+    private List<string> FireRules(GameRecord record, Game game, string moverId)
+    {
+        var notes = new List<string>();
+        foreach (var rule in record.Dice.Rules.ToList())
+        {
+            if (game.IsOver || !rule.Matches(moverId))
+            {
+                continue;
+            }
+
+            rule.TurnsSeen++;
+            if (rule.TurnsSeen % rule.Every != 0)
+            {
+                continue;
+            }
+
+            notes.Add(TryFireRule(game, rule)
+                ? $":repeat: *Rule:* {rule.Summary}"
+                : $":repeat: *Rule skipped:* {rule.Summary} _(no legal way to do it this turn)_");
+
+            if (rule.TimesLeft is { } left)
+            {
+                rule.TimesLeft = left - 1;
+                if (rule.TimesLeft <= 0)
+                {
+                    record.Dice.Rules.Remove(rule);
+                    notes.Add($"_That rule has run out._");
+                }
+            }
+        }
+
+        return notes;
+    }
+
+    private async Task PostRuleNotesAsync(GameRecord record, List<string> notes, CancellationToken ct)
+    {
+        if (notes.Count > 0)
+        {
+            await slack.PostMessageAsync(new SlackMessage(record.ChannelId, string.Join('\n', notes), ThreadTs: record.ThreadTs), ct);
+        }
+    }
+
+    private bool TryFireRule(Game game, PassiveRule rule)
+    {
+        var before = game.Current;
+        for (var attempt = 0; attempt < RuleFiringAttempts; attempt++)
+        {
+            if (!DiceRules.TryBuildEdits(before, rule.Effects, out var edits, out _, dice.Pick) ||
+                !Game.ValidateAfterTurnEdits(before, edits, out _))
+            {
+                continue;
+            }
+
+            // Like gambles, rules can't hand anyone a checkmate within two moves they didn't already have.
+            var after = before.WithEdits(edits, passTurn: false);
+            if ((after.IsMatedWithin(2) && !before.IsMatedWithin(2)) || (after.CanForceMate(2) && !before.CanForceMate(2)))
+            {
+                continue;
+            }
+
+            if (game.TryApplyAfterTurn(edits, out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
