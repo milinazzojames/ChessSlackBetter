@@ -84,13 +84,15 @@ public static partial class CommandParser
         {
             case "help" or "commands" or "?":
                 return new HelpCommand();
-            case "threeplayerchess" or "threeplayer" or "3pchess" or "3p" or "threeplayerdice" or "threeplayerdiceroll" or "3pdice":
+            case "threeplayerchess" or "threeplayer" or "3pchess" or "3p" or "threeplayerdice" or "threeplayerdiceroll" or "3pdice" or
+                "threeplayergambit" or "3pgambit":
                 var opponents = Mention().Matches(trimmed).Select(m => m.Groups[1].Value).Distinct().ToList();
                 return opponents.Count == 2
                     ? new ThreePlayerChallengeCommand(opponents[0], opponents[1],
-                        verb.Contains("dice") || words.Any(w => w.StartsWith("dice", StringComparison.OrdinalIgnoreCase)))
+                        verb.Contains("dice") || verb.Contains("gambit") ||
+                        words.Any(w => w.StartsWith("dice", StringComparison.OrdinalIgnoreCase) || w.Equals("gambit", StringComparison.OrdinalIgnoreCase)))
                     : new UnknownCommand(trimmed);
-            case "challenge" or "play" or "duel" or "vs" or "diceroll" or "chessdiceroll" or "dice" or
+            case "challenge" or "play" or "duel" or "vs" or "diceroll" or "chessdiceroll" or "dice" or "gambit" or
                 "chess960" or "960" or "fischerrandom" or "fischer" or "freestyle":
                 if (mentioned is null)
                 {
@@ -100,8 +102,8 @@ public static partial class CommandParser
                 PieceColor? color = null;
                 if (words.Any(w => w.Equals("white", StringComparison.OrdinalIgnoreCase))) color = PieceColor.White;
                 if (words.Any(w => w.Equals("black", StringComparison.OrdinalIgnoreCase))) color = PieceColor.Black;
-                var mode = verb is "diceroll" or "chessdiceroll" or "dice" ||
-                           words.Any(w => w.Equals("diceroll", StringComparison.OrdinalIgnoreCase))
+                var mode = verb is "diceroll" or "chessdiceroll" or "dice" or "gambit" ||
+                           words.Any(w => w.Equals("diceroll", StringComparison.OrdinalIgnoreCase) || w.Equals("gambit", StringComparison.OrdinalIgnoreCase))
                     ? GameMode.DiceRoll
                     : verb is "chess960" or "960" or "fischerrandom" or "fischer" or "freestyle" ||
                       words.Any(w => w is "960" || w.Equals("chess960", StringComparison.OrdinalIgnoreCase))
@@ -141,9 +143,9 @@ public static partial class CommandParser
             case "leaderboard" or "top" or "rankings":
                 var board = words.Skip(1).FirstOrDefault()?.ToLowerInvariant() ?? "";
                 return new LeaderboardCommand(
-                    board.StartsWith("dice") ? GameMode.DiceRoll :
+                    board.StartsWith("dice") || board == "gambit" ? GameMode.DiceRoll :
                     board is "960" or "chess960" or "fischer" or "fischerrandom" or "freestyle" ? GameMode.Chess960 :
-                    board is "3pdice" or "threeplayerdice" ? GameMode.ThreePlayerDice :
+                    board is "3pdice" or "threeplayerdice" or "3pgambit" or "threeplayergambit" ? GameMode.ThreePlayerDice :
                     board is "3p" or "three" or "threeplayer" or "threeplayerchess" ? GameMode.ThreePlayer :
                     GameMode.Standard);
             case "theme" or "colours" or "colors":

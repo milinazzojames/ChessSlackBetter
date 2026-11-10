@@ -55,8 +55,22 @@ A variant: normal chess, but on your turn you may gamble on a d20 instead of mov
 - Each player gets **5 rolls** per game. Cancelled or vetoed gambles don't count, and don't use your turn.
 - The opponent gets **1 veto** per game.
 - Dice can't touch kings, deliver checkmate (or set one up within two moves), stalemate, or leave your own king in check.
+- **Jimmy gambit:** say "Jimmy gambit" for a reward or penalty that sacrifices every piece except your king and the
+  pieces that stop it being in check (blockers in front of an enemy rook, bishop or queen). Code works out which
+  pieces stay, e.g. `roll give me a queen on d4, if I fail Jimmy gambit`. Two-player dice only.
 - Gambles can be pointless (they just get easy odds) or random ("a random one of their pieces becomes a pawn");
   random outcomes are priced on their average and picked when the die is rolled.
+- **Anything goes:** the referee accepts any gamble it can show on the board. It refuses only when the penalty
+  doesn't really cost you (e.g. "add a queen for me, else remove my opponent's queen") or when winning would mate
+  the opponent or leave them within two moves of a forced mate. Requests the board can't show literally ("my
+  knights move like queens") get the closest version, and the referee says what it did.
+- **Passive rules:** an outcome can add a lasting rule, e.g. `roll every turn I gain a pawn on a random empty
+  square, if I fail I lose my queen`. A rule fires at the end of matching turns (yours, your opponent's, or
+  every turn), optionally only every Nth one or a set number of times. It changes the board without using a
+  turn, and random squares are picked fresh each time. If a firing would be illegal, or would hand someone a mate
+  within two moves, it's skipped. Rules in play are listed under the board, and the PGN shows each firing as a
+  `{rule …}` comment. A rule is priced on the material it should move over about the next ten turns.
+- `@ChessBetterBot gambit @friend` works the same as `diceroll` (and `threeplayergambit` as `threeplayerdice`).
 - Dice games have their own stats: `@ChessBetterBot leaderboard dice`, and `stats` shows gambles won.
 
 Dice mode needs an [Anthropic API key](https://console.anthropic.com/) (`Anthropic:ApiKey`); everything else

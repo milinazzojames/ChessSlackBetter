@@ -287,6 +287,48 @@ public class DiceGameTests
         Assert.Contains("gambles won 1/1", _slack.Posted[^1].Text);
     }
 
+    [Fact]
+    public async Task A_passive_rule_fires_after_the_owners_turns_until_it_runs_out()
+    {
+        var thread = await StartAfterE4E5();
+        var pawnRule = new DiceRuleSpec(RuleTriggers.OwnTurn, 1, 2,
+            [new DiceEffect("add", DiceRules.RandomEmpty, "", "pawn", "white")], "A white pawn appears on a random empty square");
+        _judge.Ruling = FakeDiceJudge.AcceptOptions(
+            [new DiceOption([], "You gain a pawn on each of your next two turns", [pawnRule])],
+            [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
+
+        await Mention(Alice, "every turn I gain a pawn on a random empty square, if I fail I lose a pawn", thread);
+
+        // Two pawns from the rule against one lost: fair odds are 1/3, so 14+.
+        Assert.Equal(14, (await Record(thread)).Dice.Pending!.Target);
+
+        _roller.Next = 20;
+        await Click(Alice, ActionIds.Roll, thread);
+        Assert.Single((await Record(thread)).Dice.Rules);
+        Assert.Contains("Rules in play", _slack.Posted[^1].Blocks!.ToJsonString());
+
+        // Not on the turn the gamble was rolled, nor on the opponent's turn.
+        await Say(Bob, "Nc6", thread);
+        Assert.DoesNotContain(PlayedMove.AfterSeparator, string.Concat((await Record(thread)).Moves));
+
+        // The fake roller always picks the first candidate off ranks 1 and 8: d2 once d4 has been played, then e2.
+        await Say(Alice, "d4", thread);
+        var record = await Record(thread);
+        var position = record.LoadGame().Current;
+        Assert.Equal(new Piece(PieceType.Pawn, PieceColor.White), position[Square.Parse("d2")]);
+        Assert.Equal(PieceColor.Black, position.SideToMove);
+        Assert.Equal(1, record.Dice.Rules.Single().TimesLeft);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("*Rule:* A white pawn appears"));
+        Assert.Contains("hl=d2", _slack.Posted[^1].Blocks!.ToJsonString());
+
+        await Say(Bob, "Nf6", thread);
+        await Say(Alice, "Nf3", thread);
+        record = await Record(thread);
+        Assert.Equal(new Piece(PieceType.Pawn, PieceColor.White), record.LoadGame().Current[Square.Parse("e2")]);
+        Assert.Empty(record.Dice.Rules);
+        Assert.Contains("d4 {rule d2=P}", record.LoadGame().MovesSan());
+    }
+
     private async Task<string> StartAfterE4E5()
     {
         await Mention(Alice, $"diceroll <@{Bob}> white");
@@ -323,6 +365,45 @@ public class DiceRulesTests
     public void Fair_target_balances_reward_and_risk(double gain, double loss, int expected)
     {
         Assert.Equal(expected, DiceRules.FairTarget(gain, loss));
+    }
+
+    [Fact]
+    public void Random_selectors_pick_from_the_right_squares()
+    {
+        // The only white non-king piece is the a2 pawn; the only empty squares a pawn may use are on ranks 2-7.
+        var position = Position.FromFen("4k3/8/8/8/8/8/P7/4K3 w - - 0 1");
+        Assert.True(DiceRules.TryBuildEdits(position, [new DiceEffect("remove", DiceRules.RandomWhite, "", "", "")],
+            out var edits, out var error, _ => 0), error);
+        Assert.Equal(["a2=-"], edits.Select(e => e.ToString()));
+
+        Assert.True(DiceRules.TryBuildEdits(position, [new DiceEffect("add", DiceRules.RandomEmpty, "", "pawn", "black")],
+            out edits, out error, _ => 0), error);
+        Assert.Equal(["b2=p"], edits.Select(e => e.ToString()));
+
+        Assert.False(DiceRules.TryBuildEdits(position, [new DiceEffect("remove", DiceRules.RandomBlack, "", "", "")],
+            out _, out error, _ => 0));
+        Assert.Contains("no square to pick", error);
+    }
+
+    [Fact]
+    public void Jimmy_gambit_sacrifices_everything_but_the_king_and_its_shields()
+    {
+        // The e2 knight blocks the e8 rook and the d2 pawn blocks the a5 bishop (the c3 pawn behind it doesn't
+        // count). The a1 rook, d1 queen, c3 pawn and f2 pawn shield nothing.
+        var position = Position.FromFen("4r2k/8/8/b7/8/2P5/3PNP2/R2QK3 w - - 0 1");
+        Assert.True(DiceRules.TryBuildEdits(position, [new DiceEffect(DiceRules.JimmyGambit, "", "", "", "white")],
+            out var edits, out var error), error);
+
+        Assert.Equal(["a1=-", "c3=-", "d1=-", "f2=-"], edits.Select(e => e.ToString()).Order());
+        Assert.Equal(-16, DiceRules.MaterialDelta(position, edits, PieceColor.White));
+        Assert.True(Game.ValidateEdits(position, edits, out error), error);
+    }
+
+    [Fact]
+    public void Jimmy_gambit_needs_a_side()
+    {
+        Assert.False(DiceRules.TryBuildEdits(Position.Start, [new DiceEffect(DiceRules.JimmyGambit, "", "", "", "")], out _, out var error));
+        Assert.Contains("Jimmy gambit", error);
     }
 
     [Fact]

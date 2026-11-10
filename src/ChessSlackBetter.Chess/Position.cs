@@ -305,8 +305,9 @@ public sealed class Position
     /// <summary>
     /// Changes pieces on the board in place of a move: the turn passes, en passant is cleared and castling rights
     /// are dropped for any king or rook no longer on its home square. Does not check legality.
+    /// With <paramref name="passTurn"/> false (passive dice rules firing between turns) the same side stays to move.
     /// </summary>
-    public Position WithEdits(IEnumerable<SquareEdit> edits)
+    public Position WithEdits(IEnumerable<SquareEdit> edits, bool passTurn = true)
     {
         var board = (Piece[])_board.Clone();
         foreach (var edit in edits)
@@ -333,11 +334,11 @@ public sealed class Position
 
         return new Position(
             board,
-            SideToMove.Opponent(),
+            passTurn ? SideToMove.Opponent() : SideToMove,
             castling,
             -1,
             0,
-            SideToMove == PieceColor.Black ? FullmoveNumber + 1 : FullmoveNumber,
+            passTurn && SideToMove == PieceColor.Black ? FullmoveNumber + 1 : FullmoveNumber,
             Layout);
     }
 
