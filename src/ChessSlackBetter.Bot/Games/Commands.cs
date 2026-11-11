@@ -26,6 +26,9 @@ public sealed record CancelRollCommand : BotCommand;
 /// <summary>The opponent blocks the pending gamble.</summary>
 public sealed record VetoCommand : BotCommand;
 
+/// <summary>An answer to the riddle a riddle rule asked.</summary>
+public sealed record AnswerCommand(string Answer) : BotCommand;
+
 public sealed record AcceptCommand : BotCommand;
 
 public sealed record DeclineCommand : BotCommand;
@@ -116,6 +119,8 @@ public static partial class CommandParser
                 return new ConfirmRollCommand();
             case "no" or "n" or "nope" or "nah":
                 return new CancelRollCommand();
+            case "answer" or "guess" when words.Length > 1:
+                return new AnswerCommand(trimmed[words[0].Length..].Trim());
             case "veto":
                 return new VetoCommand();
             case "accept":

@@ -33,6 +33,11 @@ public sealed partial class ChessBotService
             return;
         }
 
+        if (await OwesRiddleAsync(record, userId, reply))
+        {
+            return;
+        }
+
         if (record.Dice.RollsLeft(userId) <= 0)
         {
             await reply($"You've used all {DiceLimits.RollsPerPlayer} of your rolls this game. Time to play it straight!");
@@ -112,6 +117,7 @@ public sealed partial class ChessBotService
         }
 
         var game = record.LoadGame();
+        var before = game.Current;
         var roll = dice.RollD20();
         var success = roll >= proposal.Target;
         var outcomes = success ? proposal.SuccessOutcomes : proposal.FailureOutcomes;
@@ -128,12 +134,14 @@ public sealed partial class ChessBotService
             return;
         }
 
+        FollowDamage(record, before, game.Current);
         var outcome = Messages.DiceRollOutcome(proposal, roll, success, picked.Summary);
         record.Dice.RollsUsed[userId] = record.Dice.RollsUsed.GetValueOrDefault(userId) + 1;
         record.Dice.Log.Add(new DiceRollResult(userId, proposal.Request, proposal.Target, roll, success, picked.Summary));
 
         // Rules already in play fire for this turn; the new ones start with the next matching turn.
         var ruleNotes = FireRules(record, game, userId);
+        ruleNotes.AddRange(await FireCustomRulesAsync(record, game, userId, ct));
         if (!game.IsOver)
         {
             record.Dice.Rules.AddRange((picked.Rules ?? []).Select(spec => PassiveRule.From(spec, userId)));
@@ -154,6 +162,7 @@ public sealed partial class ChessBotService
         else
         {
             await PostBoardAsync(record, game, ct);
+            await AskRiddlesAsync(record, game, ct);
         }
 
         await MaybeQuoteAsync(record, game, ct);
@@ -301,18 +310,36 @@ public sealed partial class ChessBotService
     private static bool CanEverFire(Position position, DiceRuleSpec rule, out string? error)
     {
         error = "it has no effects.";
-        if (rule.Effects.Count == 0)
+        if (rule.IsCustom)
         {
-            return false;
+            // The referee decides what a custom rule does each time, so there's nothing to check up front.
+            error = null;
+            return true;
         }
 
-        var random = new Random(4321);
-        for (var i = 0; i < 24; i++)
+        var lists = (rule.IsRiddle ? [rule.CorrectEffects ?? [], rule.Effects] : new[] { rule.Effects })
+            .Where(l => l.Count > 0)
+            .ToList();
+        if (lists.Count == 0)
         {
-            if (DiceRules.TryBuildEdits(position, rule.Effects, out var edits, out error, random.Next) &&
-                ValidatePieceEdits(position, edits, out error))
+            // A riddle with nothing riding on it is pointless but harmless.
+            return rule.IsRiddle;
+        }
+
+        // The gamble is made on the requester's turn, so they're the side to move.
+        var random = new Random(4321);
+        foreach (var target in DiceRules.TargetsOf(rule.Trigger, position.SideToMove))
+        {
+            foreach (var effects in lists.Select(l => DiceRules.ForTarget(l, target)))
             {
-                return true;
+                for (var i = 0; i < 24; i++)
+                {
+                    if (DiceRules.TryBuildEdits(position, effects, out var edits, out error, random.Next) &&
+                        ValidatePieceEdits(position, edits, out error))
+                    {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -347,15 +374,17 @@ public sealed partial class ChessBotService
     private const int RuleFiringAttempts = 8;
 
     /// <summary>
-    /// Fires the passive rules that match the turn <paramref name="moverId"/> just took, editing the board
-    /// without passing the turn. Returns a line for each rule that fired or had to skip.
+    /// Fires the plain passive rules that match the turn <paramref name="moverId"/> just took, editing the board
+    /// without passing the turn. Returns a line for each rule that fired or had to skip. Riddle rules are asked
+    /// separately, by <see cref="AskRiddlesAsync"/>.
     /// </summary>
     private List<string> FireRules(GameRecord record, Game game, string moverId)
     {
         var notes = new List<string>();
+        var target = record.ColorOf(moverId);
         foreach (var rule in record.Dice.Rules.ToList())
         {
-            if (game.IsOver || !rule.Matches(moverId))
+            if (game.IsOver || rule.IsRiddle || rule.IsCustom || !rule.Matches(moverId))
             {
                 continue;
             }
@@ -366,23 +395,30 @@ public sealed partial class ChessBotService
                 continue;
             }
 
-            notes.Add(TryFireRule(game, rule)
-                ? $":repeat: *Rule:* {rule.Summary}"
+            notes.Add(TryFireRule(game, record.Dice, DiceRules.ForTarget(rule.Effects, target), out var log)
+                ? $":repeat: *Rule:* {rule.Summary}{LogText(log)}"
                 : $":repeat: *Rule skipped:* {rule.Summary} _(no legal way to do it this turn)_");
 
-            if (rule.TimesLeft is { } left)
-            {
-                rule.TimesLeft = left - 1;
-                if (rule.TimesLeft <= 0)
-                {
-                    record.Dice.Rules.Remove(rule);
-                    notes.Add($"_That rule has run out._");
-                }
-            }
+            CountFiring(record, rule, notes);
         }
 
         return notes;
     }
+
+    private static void CountFiring(GameRecord record, PassiveRule rule, List<string> notes)
+    {
+        if (rule.TimesLeft is { } left)
+        {
+            rule.TimesLeft = left - 1;
+            if (rule.TimesLeft <= 0)
+            {
+                record.Dice.Rules.Remove(rule);
+                notes.Add($"_\"{rule.Summary}\" has run out._");
+            }
+        }
+    }
+
+    private static string LogText(List<string> log) => log.Count == 0 ? "" : "\n> " + string.Join("\n> ", log);
 
     private async Task PostRuleNotesAsync(GameRecord record, List<string> notes, CancellationToken ct)
     {
@@ -392,13 +428,30 @@ public sealed partial class ChessBotService
         }
     }
 
-    private bool TryFireRule(Game game, PassiveRule rule)
+    /// <summary>
+    /// Applies rule effects after the last turn, retrying random picks a few times. Damage is read from and saved
+    /// to <paramref name="state"/>. A firing that only damages (or misses) still counts as fired.
+    /// </summary>
+    private bool TryFireRule(Game game, DiceState state, IReadOnlyList<DiceEffect> effects, out List<string> log)
     {
+        log = [];
         var before = game.Current;
         for (var attempt = 0; attempt < RuleFiringAttempts; attempt++)
         {
-            if (!DiceRules.TryBuildEdits(before, rule.Effects, out var edits, out _, dice.Pick) ||
-                !Game.ValidateAfterTurnEdits(before, edits, out _))
+            var context = new EffectContext(state.Damage);
+            if (!DiceRules.TryBuildEdits(before, effects, out var edits, out _, dice.Pick, context))
+            {
+                continue;
+            }
+
+            if (edits.Count == 0)
+            {
+                state.Damage = context.Damage;
+                log = context.Log;
+                return true;
+            }
+
+            if (!Game.ValidateAfterTurnEdits(before, edits, out _))
             {
                 continue;
             }
@@ -412,10 +465,148 @@ public sealed partial class ChessBotService
 
             if (game.TryApplyAfterTurn(edits, out _))
             {
+                state.Damage = DiceRules.FollowDamage(before, game.Current, context.Damage);
+                log = context.Log;
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>Carries damage along with the pieces after a move or gamble changed the board.</summary>
+    private static void FollowDamage(GameRecord record, Position before, Position after)
+    {
+        if (record.Dice.Damage.Count > 0)
+        {
+            record.Dice.Damage = DiceRules.FollowDamage(before, after, record.Dice.Damage);
+        }
+    }
+
+    /// <summary>
+    /// After a turn, asks the player now to move a riddle for each riddle rule that matches their turn. They have
+    /// to answer before they can move or gamble.
+    /// </summary>
+    private async Task AskRiddlesAsync(GameRecord record, Game game, CancellationToken ct)
+    {
+        if (record.Mode != GameMode.DiceRoll || game.IsOver)
+        {
+            return;
+        }
+
+        var solver = game.Current.SideToMove;
+        var solverId = record.PlayerFor(solver);
+        var notes = new List<string>();
+        var asked = new List<PendingRiddle>();
+        foreach (var rule in record.Dice.Rules.ToList())
+        {
+            if (!rule.IsRiddle || rule.IsCustom || !rule.Matches(solverId))
+            {
+                continue;
+            }
+
+            rule.TurnsSeen++;
+            if (rule.TurnsSeen % rule.Every != 0)
+            {
+                continue;
+            }
+
+            Riddle riddle;
+            try
+            {
+                riddle = await judge.WriteRiddleAsync(rule.Theme, record.Dice.RiddleAnswers, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Couldn't write a riddle for rule {Rule}", rule.Summary);
+                notes.Add($":jigsaw: *Riddle skipped:* I couldn't come up with one this time. ({rule.Summary})");
+                CountFiring(record, rule, notes);
+                continue;
+            }
+
+            var pending = new PendingRiddle
+            {
+                SolverId = solverId,
+                Question = riddle.Question,
+                Answer = riddle.Answer,
+                AlsoAccepted = riddle.AlsoAccepted.ToList(),
+                CorrectEffects = DiceRules.ForTarget(rule.CorrectEffects, solver),
+                WrongEffects = DiceRules.ForTarget(rule.Effects, solver),
+                Summary = rule.Summary,
+            };
+            record.Dice.Riddles.Add(pending);
+            record.Dice.RiddleAnswers.Add(riddle.Answer);
+            asked.Add(pending);
+            CountFiring(record, rule, notes);
+        }
+
+        if (asked.Count == 0 && notes.Count == 0)
+        {
+            return;
+        }
+
+        await SaveAsync(record, ct);
+        foreach (var riddle in asked)
+        {
+            await slack.PostMessageAsync(new SlackMessage(record.ChannelId, Messages.RiddleQuestion(riddle), ThreadTs: record.ThreadTs), ct);
+        }
+
+        await PostRuleNotesAsync(record, notes, ct);
+    }
+
+    private async Task AnswerRiddleAsync(GameRecord record, string userId, string answer, Func<string, Task> reply, CancellationToken ct)
+    {
+        if (record.State != GameState.Active || record.Dice.RiddleFor(userId) is not { } riddle)
+        {
+            await reply("There's no riddle waiting for you.");
+            return;
+        }
+
+        var game = record.LoadGame();
+        if (riddle.RuleId is not null)
+        {
+            await AnswerCustomQuestionAsync(record, game, userId, riddle, answer, ct);
+            return;
+        }
+
+        var correct = Messages.IsRiddleAnswer(answer, riddle);
+        var effects = correct ? riddle.CorrectEffects : riddle.WrongEffects;
+        var result = effects.Count == 0
+            ? ""
+            : TryFireRule(game, record.Dice, effects, out var log)
+                ? LogText(log)
+                : "\n_…but there was no legal way to do that this turn, so nothing happens._";
+
+        record.Dice.Riddles.Remove(riddle);
+        record.SyncFrom(game);
+        await SaveAsync(record, ct);
+
+        var verdict = correct
+            ? $":white_check_mark: <@{userId}> answered *{answer.Trim()}*: correct! The answer was *{riddle.Answer}*."
+            : $":x: <@{userId}> answered *{answer.Trim()}*: wrong! The answer was *{riddle.Answer}*.";
+        await slack.PostMessageAsync(new SlackMessage(record.ChannelId, verdict + result, ThreadTs: record.ThreadTs), ct);
+
+        if (game.IsOver)
+        {
+            await FinishAsync(record, game, ct);
+        }
+        else if (record.Dice.RiddleFor(userId) is null)
+        {
+            await PostBoardAsync(record, game, ct);
+        }
+    }
+
+    /// <summary>Replies and returns true when the player still owes a riddle answer, so can't move or gamble yet.</summary>
+    private static async Task<bool> OwesRiddleAsync(GameRecord record, string userId, Func<string, Task> reply)
+    {
+        if (record.Dice.RiddleFor(userId) is not { } riddle)
+        {
+            return false;
+        }
+
+        await reply(riddle.RuleId is null
+            ? $":jigsaw: Answer your riddle first: _{riddle.Question}_\nJust type your answer in the thread."
+            : $":question: Reply to this first: _{riddle.Question}_\nJust type your reply in the thread.");
+        return true;
     }
 }

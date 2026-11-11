@@ -70,6 +70,24 @@ A variant: normal chess, but on your turn you may gamble on a d20 instead of mov
   turn, and random squares are picked fresh each time. If a firing would be illegal, or would hand someone a mate
   within two moves, it's skipped. Rules in play are listed under the board, and the PGN shows each firing as a
   `{rule …}` comment. A rule is priced on the material it should move over about the next ten turns.
+- **Riddle rules:** e.g. `roll every turn a player answers a riddle, right gets a pawn on a random empty square,
+  wrong is a Jimmy gambit, if I fail I lose my knight`. Before each matching turn Claude writes a fresh riddle with
+  a one-word answer, and the player to move has to answer it before moving or gambling. They type the answer in
+  the thread (or `@ChessBetterBot answer <word>`), then the bot reveals the answer and applies the right- or
+  wrong-answer effect to them. Case, punctuation, "a/the" and plurals don't matter. A riddle is priced as a coin flip.
+- **Damage rules:** a rule can deal 1 damage to a piece instead of removing it. Pieces have as many hit points as
+  their value (pawn 1, knight/bishop 3, rook 5, queen 9). Damage follows a piece as it moves and is listed under
+  the board. For example, "battleship" fires at a random square after every turn: empty squares and kings are
+  misses.
+- **Custom rules (anything else):** if a lasting rule can't be built from the effects above, the referee writes it
+  as a custom rule and runs it itself each time it fires, e.g. `pieces that sit still for 3 turns grow into the
+  next piece up` or `rock-paper-scissors before every capture`. Each firing it sees the board, the last move, the
+  rule's own memory (counters, scores, per-piece state), the damage table and fresh random numbers from the bot,
+  so it never makes up its own randomness. It can change the board, post a message, keep a status line under the
+  board, ask a player a question they must reply to before their next move (any reply, judged by the referee),
+  and end the rule. Code still checks every board change against the usual limits. Custom rules use
+  `Anthropic:RuleModel` (default `claude-sonnet-5-5`, for speed) and are priced on the referee's own estimate of
+  their value, capped at 30 pawns either way.
 - `@ChessBetterBot gambit @friend` works the same as `diceroll` (and `threeplayergambit` as `threeplayerdice`).
 - Dice games have their own stats: `@ChessBetterBot leaderboard dice`, and `stats` shows gambles won.
 

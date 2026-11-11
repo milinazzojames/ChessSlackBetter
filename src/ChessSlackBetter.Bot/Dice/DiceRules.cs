@@ -9,6 +9,9 @@ public static class DiceRules
     /// <summary>Largest positional adjustment (in pawns) the referee may add on top of material.</summary>
     public const double MaxPositionalBonus = 3;
 
+    /// <summary>Largest value (in pawns, either way) the referee may put on a custom rule.</summary>
+    public const double MaxCustomRuleValue = 30;
+
     public static int PieceValue(PieceType type) => type switch
     {
         PieceType.Pawn => 1,
@@ -30,6 +33,75 @@ public static class DiceRules
     /// <summary>A random piece of either colour other than a king.</summary>
     public const string RandomPiece = "random_piece";
 
+    /// <summary>Any of the 64 squares, occupied or not. Meant for damage, where an empty square or a king is a miss.</summary>
+    public const string RandomSquare = "random_square";
+
+    /// <summary>
+    /// Effect type: one point of damage to the piece on the square. A piece has as many hit points as its value
+    /// (pawn 1, knight and bishop 3, rook 5, queen 9) and is removed when they run out. Empty squares and kings
+    /// are misses.
+    /// </summary>
+    public const string Damage = "damage";
+
+    private static void ApplyDamage(Piece[] board, int square, EffectContext context)
+    {
+        var piece = board[square];
+        var name = Square.Name(square);
+        if (piece.IsEmpty || piece.Type == PieceType.King)
+        {
+            context.Log.Add(piece.IsEmpty ? $"{name}: miss" : $"{name}: bounces off the {Describe(piece)}");
+            return;
+        }
+
+        var taken = context.Damage.GetValueOrDefault(name) + 1;
+        var health = PieceValue(piece.Type);
+        if (taken >= health)
+        {
+            board[square] = Piece.Empty;
+            context.Damage.Remove(name);
+            context.Log.Add($"{name}: hit! The {Describe(piece)} is sunk");
+        }
+        else
+        {
+            context.Damage[name] = taken;
+            context.Log.Add($"{name}: hit! The {Describe(piece)} is down to {health - taken}/{health}");
+        }
+    }
+
+    public static string Describe(Piece piece) =>
+        $"{piece.Color.ToString().ToLowerInvariant()} {piece.Type.ToString().ToLowerInvariant()}";
+
+    /// <summary>
+    /// Moves damage along with the pieces between two positions: a damaged piece that's still on its square keeps
+    /// it, one that moved takes it to wherever an identical piece newly appeared, and one that was captured,
+    /// removed or changed loses it.
+    /// </summary>
+    public static Dictionary<string, int> FollowDamage(Position before, Position after, Dictionary<string, int> damage)
+    {
+        var result = new Dictionary<string, int>();
+        var claimed = new HashSet<int>();
+        foreach (var (name, points) in damage)
+        {
+            if (!Square.TryParse(name, out var from) || before[from].IsEmpty)
+            {
+                continue;
+            }
+
+            var piece = before[from];
+            int? to = after[from] == piece
+                ? from
+                : Enumerable.Range(0, 64).Cast<int?>().FirstOrDefault(sq =>
+                    after[sq!.Value] == piece && before[sq.Value] != piece && !claimed.Contains(sq.Value));
+            if (to is { } dest)
+            {
+                claimed.Add(dest);
+                result[Square.Name(dest)] = points;
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Applies the effects in order to a copy of the board and returns the squares that changed. Squares may be
     /// random selectors (<see cref="RandomEmpty"/> and friends), resolved with <paramref name="pick"/>, which
@@ -40,14 +112,27 @@ public static class DiceRules
         IReadOnlyList<DiceEffect> effects,
         [NotNullWhen(true)] out List<SquareEdit>? edits,
         [NotNullWhen(false)] out string? error,
-        Func<int, int>? pick = null)
+        Func<int, int>? pick = null,
+        EffectContext? context = null)
     {
         pick ??= Random.Shared.Next;
+        context ??= new EffectContext();
         edits = null;
         var board = Enumerable.Range(0, 64).Select(sq => position[sq]).ToArray();
 
         foreach (var effect in effects)
         {
+            if (effect.Type.Equals(Damage, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryResolveSquare(board, effect.Square, false, pick, out var target, out error))
+                {
+                    return false;
+                }
+
+                ApplyDamage(board, target, context);
+                continue;
+            }
+
             if (effect.Type.Equals(JimmyGambit, StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryParseColor(effect.Color, out var side))
@@ -170,12 +255,13 @@ public static class DiceRules
             RandomWhite => sq => NotKing(sq) && board[sq].Color == PieceColor.White,
             RandomBlack => sq => NotKing(sq) && board[sq].Color == PieceColor.Black,
             RandomPiece => NotKing,
+            RandomSquare => _ => true,
             _ => _ => false,
         }).ToList();
 
         if (candidates.Count == 0)
         {
-            error = text.ToLowerInvariant() is RandomEmpty or RandomWhite or RandomBlack or RandomPiece
+            error = text.ToLowerInvariant() is RandomEmpty or RandomWhite or RandomBlack or RandomPiece or RandomSquare
                 ? $"There's no square to pick for `{text}`."
                 : $"`{text}` isn't a square.";
             return false;
@@ -191,21 +277,17 @@ public static class DiceRules
     /// </summary>
     public static double EstimateRuleValue(Position position, DiceRuleSpec rule, PieceColor player)
     {
-        const int samples = 24;
-        var random = new Random(12345);
-        var deltas = new List<int>();
-        for (var i = 0; i < samples; i++)
+        // Code can't simulate a custom rule, so the referee's own estimate of its worth is used, within reason.
+        if (rule.IsCustom)
         {
-            if (TryBuildEdits(position, rule.Effects, out var edits, out _, random.Next))
-            {
-                deltas.Add(MaterialDelta(position, edits, player));
-            }
+            return Math.Clamp(rule.CustomValue, -MaxCustomRuleValue, MaxCustomRuleValue);
         }
 
-        if (deltas.Count == 0)
-        {
-            return 0;
-        }
+        // A riddle is treated as a coin flip between its right- and wrong-answer effects.
+        var perFiring = TargetsOf(rule.Trigger, player).Average(target => rule.IsRiddle
+            ? 0.5 * SampleValue(position, ForTarget(rule.CorrectEffects ?? [], target), player) +
+              0.5 * SampleValue(position, ForTarget(rule.Effects, target), player)
+            : SampleValue(position, ForTarget(rule.Effects, target), player));
 
         // Look ahead about ten of each player's turns; that's most of a typical dice game.
         var turns = rule.Trigger == RuleTriggers.EveryTurn ? 20.0 : 10.0;
@@ -215,7 +297,71 @@ public static class DiceRules
             firings = Math.Min(firings, rule.Times);
         }
 
-        return deltas.Average() * firings;
+        return perFiring * firings;
+    }
+
+    private static double SampleValue(Position position, IReadOnlyList<DiceEffect> effects, PieceColor player)
+    {
+        const int samples = 24;
+        var random = new Random(12345);
+        var deltas = new List<int>();
+        for (var i = 0; i < samples && effects.Count > 0; i++)
+        {
+            if (TryBuildEdits(position, effects, out var edits, out _, random.Next))
+            {
+                deltas.Add(MaterialDelta(position, edits, player));
+            }
+        }
+
+        return deltas.Count == 0 ? 0 : deltas.Average();
+    }
+
+    /// <summary>
+    /// The colours a rule can act on: the requester's for own_turn, the opponent's for opponent_turn, both for
+    /// every_turn. For a plain rule that's the player who just moved; for a riddle, the player answering.
+    /// </summary>
+    public static PieceColor[] TargetsOf(string trigger, PieceColor owner) => trigger switch
+    {
+        RuleTriggers.OwnTurn => [owner],
+        RuleTriggers.OpponentTurn => [owner.Opponent()],
+        _ => [owner, owner.Opponent()],
+    };
+
+    /// <summary>Colour meaning "the player the rule is acting on" (see <see cref="TargetsOf"/>).</summary>
+    public const string Target = "target";
+
+    /// <summary>Colour meaning that player's opponent.</summary>
+    public const string TargetOpponent = "target_opponent";
+
+    /// <summary>A random piece (not the king) of the player the rule is acting on.</summary>
+    public const string RandomTarget = "random_target";
+
+    /// <summary>A random piece (not the king) of that player's opponent.</summary>
+    public const string RandomTargetOpponent = "random_target_opponent";
+
+    /// <summary>Replaces the target colours and selectors in rule effects with real ones for <paramref name="target"/>.</summary>
+    public static List<DiceEffect> ForTarget(IEnumerable<DiceEffect> effects, PieceColor target)
+    {
+        var own = target == PieceColor.White ? "white" : "black";
+        var other = target == PieceColor.White ? "black" : "white";
+        string Square(string text) => text.ToLowerInvariant() switch
+        {
+            RandomTarget => $"random_{own}",
+            RandomTargetOpponent => $"random_{other}",
+            _ => text,
+        };
+
+        return effects.Select(e => e with
+        {
+            Square = Square(e.Square),
+            ToSquare = Square(e.ToSquare),
+            Color = e.Color.ToLowerInvariant() switch
+            {
+                Target => own,
+                TargetOpponent => other,
+                _ => e.Color,
+            },
+        }).ToList();
     }
 
     /// <summary>Effect type for the Jimmy gambit (see <see cref="ApplyJimmyGambit"/>).</summary>
@@ -329,4 +475,23 @@ public static class DiceRules
         color = text.Equals("black", StringComparison.OrdinalIgnoreCase) ? PieceColor.Black : PieceColor.White;
         return text.Equals("white", StringComparison.OrdinalIgnoreCase) || text.Equals("black", StringComparison.OrdinalIgnoreCase);
     }
+}
+
+/// <summary>State that effects read and write besides the board: damage taken so far, and what happened.</summary>
+public sealed class EffectContext
+{
+    public EffectContext()
+    {
+    }
+
+    public EffectContext(IDictionary<string, int> damage)
+    {
+        Damage = new Dictionary<string, int>(damage);
+    }
+
+    /// <summary>Damage points taken by the piece on each square (square name to points).</summary>
+    public Dictionary<string, int> Damage { get; } = new();
+
+    /// <summary>Lines describing hits and misses, for the players.</summary>
+    public List<string> Log { get; } = [];
 }

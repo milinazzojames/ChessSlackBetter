@@ -136,6 +136,32 @@ public sealed class FakeDiceJudge : IDiceJudge
         Requests.Add(request);
         return Task.FromResult(Ruling);
     }
+
+    public Riddle NextRiddle { get; set; } = new("I speak without a mouth and hear without ears. What am I?", "echo", ["echoes"]);
+
+    public List<string> RiddleThemes { get; } = [];
+
+    public Task<Riddle> WriteRiddleAsync(string theme, IReadOnlyList<string> usedAnswers, CancellationToken ct = default)
+    {
+        RiddleThemes.Add(theme);
+        return Task.FromResult(NextRiddle);
+    }
+
+    /// <summary>Custom rule calls, and the results to hand back in order (the last one repeats).</summary>
+    public List<CustomRuleCall> RuleCalls { get; } = [];
+
+    public Queue<CustomRuleResult> RuleResults { get; } = new();
+
+    private CustomRuleResult? _lastRuleResult;
+
+    public Task<CustomRuleResult> RunCustomRuleAsync(CustomRuleCall call, CancellationToken ct = default)
+    {
+        RuleCalls.Add(call);
+        _lastRuleResult = RuleResults.Count > 0 ? RuleResults.Dequeue() : _lastRuleResult ?? Quiet(call.Memory);
+        return Task.FromResult(_lastRuleResult);
+    }
+
+    public static CustomRuleResult Quiet(string memory) => new([], memory, "", "", "", "", false);
 }
 
 public sealed class FakeDiceRoller : IDiceRoller

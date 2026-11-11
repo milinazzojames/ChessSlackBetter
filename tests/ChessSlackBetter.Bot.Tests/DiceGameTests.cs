@@ -329,6 +329,122 @@ public class DiceGameTests
         Assert.Contains("d4 {rule d2=P}", record.LoadGame().MovesSan());
     }
 
+    [Fact]
+    public async Task A_riddle_rule_quizzes_the_player_to_move_before_they_can_play()
+    {
+        var thread = await StartAfterE4E5();
+        var riddleRule = new DiceRuleSpec(RuleTriggers.EveryTurn, 1, 0,
+            [new DiceEffect(DiceRules.JimmyGambit, "", "", "", DiceRules.Target)],
+            "Before every turn, a riddle: right gains a pawn, wrong is a Jimmy gambit",
+            RuleChallenges.Riddle,
+            [new DiceEffect("add", DiceRules.RandomEmpty, "", "pawn", DiceRules.Target)],
+            "");
+        _judge.Ruling = FakeDiceJudge.AcceptOptions(
+            [new DiceOption([], "Riddles every turn", [riddleRule])],
+            [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
+
+        await Mention(Alice, "every turn a player answers a riddle, right gets a pawn else jimmy gambit, if I fail I lose a pawn", thread);
+        _roller.Next = 20;
+        await Click(Alice, ActionIds.Roll, thread);
+
+        // Bob is next to move, so he's asked first and can't move until he answers.
+        Assert.Contains(_slack.Posted, m => m.Text.Contains($":jigsaw: <@{Bob}>, riddle time") && m.Text.Contains("hear without ears"));
+        await Say(Bob, "Nc6", thread);
+        Assert.Contains("Answer your riddle first", _slack.Ephemeral[^1].Text);
+        Assert.Equal(PieceColor.Black, (await Record(thread)).LoadGame().Current.SideToMove);
+
+        // Right (plural counts too): a black pawn on the first empty square off the back ranks, e2. Still Bob's move.
+        await Say(Bob, "Echoes!", thread);
+        var record = await Record(thread);
+        Assert.Empty(record.Dice.Riddles);
+        Assert.Equal(new Piece(PieceType.Pawn, PieceColor.Black), record.LoadGame().Current[Square.Parse("e2")]);
+        Assert.Equal(PieceColor.Black, record.LoadGame().Current.SideToMove);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("correct!") && m.Text.Contains("*echo*"));
+
+        // Bob moves, then Alice gets one and gets it wrong: everything but her king goes.
+        await Say(Bob, "Nc6", thread);
+        Assert.Equal(Alice, (await Record(thread)).Dice.Riddles.Single().SolverId);
+        await Mention(Alice, "answer banana", thread);
+        var position = (await Record(thread)).LoadGame().Current;
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("wrong!") && m.Text.Contains("The answer was *echo*"));
+        Assert.Equal(1, Enumerable.Range(0, 64).Count(sq => !position[sq].IsEmpty && position[sq].Color == PieceColor.White));
+        Assert.Equal(PieceColor.White, position.SideToMove);
+    }
+
+    [Fact]
+    public async Task Damage_wears_pieces_down_and_follows_them_as_they_move()
+    {
+        var thread = await StartAfterE4E5();
+        var battleship = new DiceRuleSpec(RuleTriggers.EveryTurn, 1, 0, [new DiceEffect(DiceRules.Damage, "g1", "", "", "")], "Battleship on g1");
+        _judge.Ruling = FakeDiceJudge.AcceptOptions(
+            [new DiceOption([], "Battleship", [battleship])],
+            [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
+
+        await Mention(Alice, "battleship, if I fail I lose a pawn", thread);
+        _roller.Next = 20;
+        await Click(Alice, ActionIds.Roll, thread);
+
+        await Say(Bob, "Nc6", thread);
+        Assert.Equal(1, (await Record(thread)).Dice.Damage["g1"]);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("g1: hit! The white knight is down to 2/3"));
+
+        // The knight takes its damage to f3; the next shot at g1 misses.
+        await Say(Alice, "Nf3", thread);
+        var record = await Record(thread);
+        Assert.Equal(new Dictionary<string, int> { ["f3"] = 1 }, record.Dice.Damage);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("g1: miss"));
+        Assert.Contains("f3 white knight 2/3", _slack.Posted[^1].Blocks!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task A_custom_rule_is_run_by_the_referee_with_memory_questions_and_replies()
+    {
+        var thread = await StartAfterE4E5();
+        var custom = new DiceRuleSpec(RuleTriggers.EveryTurn, 1, 0, [], "Rock-paper-scissors duel",
+            Custom: "After every turn the player who just moved plays rock-paper-scissors against the referee...",
+            InitialMemory: "{\"wins\":0}", CustomValue: 2);
+        _judge.Ruling = FakeDiceJudge.AcceptOptions(
+            [new DiceOption([], "Rock-paper-scissors rule", [custom])],
+            [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
+
+        await Mention(Alice, "rock paper scissors every turn, if I fail I lose a pawn", thread);
+
+        // Priced on the referee's estimate: worth 2, risking 1, so fair odds are 1/3 (14+).
+        Assert.Equal(14, (await Record(thread)).Dice.Pending!.Target);
+        _roller.Next = 20;
+        await Click(Alice, ActionIds.Roll, thread);
+        Assert.Empty(_judge.RuleCalls);
+
+        // Bob moves: the rule fires, removes a white pawn, and asks Bob something.
+        _judge.RuleResults.Enqueue(new CustomRuleResult(
+            [new DiceEffect("remove", "a2", "", "", "")], "{\"wins\":1}", "The referee threw scissors.", "Referee wins: 1", "black", "Rock, paper or scissors?", false));
+        await Say(Bob, "Nc6", thread);
+        var call = _judge.RuleCalls.Single();
+        Assert.Equal("{\"wins\":0}", call.Memory);
+        Assert.Equal(PieceColor.White, call.Owner);
+        Assert.Contains("black just finished their turn (last move: Nc6)", call.Event);
+        Assert.Equal(12, call.RandomNumbers.Count);
+
+        var record = await Record(thread);
+        Assert.True(record.LoadGame().Current[Square.Parse("a2")].IsEmpty);
+        Assert.Equal("{\"wins\":1}", record.Dice.Rules.Single().Memory);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("The referee threw scissors.") && m.Text.Contains($"<@{Bob}>, Rock, paper or scissors?"));
+        Assert.Contains("Referee wins: 1", _slack.Posted[^1].Blocks!.ToJsonString());
+
+        // Alice can move, but Bob owes a reply first; a full sentence is fine for a custom question.
+        await Say(Alice, "d4", thread);
+        await Say(Bob, "Nf6", thread);
+        Assert.Contains("Reply to this first", _slack.Ephemeral[^1].Text);
+        _judge.RuleResults.Enqueue(new CustomRuleResult([], "{\"wins\":1}", "Rock beats scissors!", "", "", "", Expire: true));
+        await Say(Bob, "I pick rock obviously", thread);
+        Assert.Contains("<reply>I pick rock obviously</reply>", _judge.RuleCalls[^1].Event);
+
+        record = await Record(thread);
+        Assert.Empty(record.Dice.Rules);
+        Assert.Empty(record.Dice.Riddles);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("Rock beats scissors!") && m.Text.Contains("has ended"));
+    }
+
     private async Task<string> StartAfterE4E5()
     {
         await Mention(Alice, $"diceroll <@{Bob}> white");
@@ -355,6 +471,53 @@ public class DiceGameTests
 
 public class DiceRulesTests
 {
+    [Fact]
+    public void Damage_sinks_a_piece_once_its_hit_points_run_out()
+    {
+        var position = Position.FromFen("4k3/8/8/8/8/8/1P6/1N2K3 w - - 0 1");
+        var context = new EffectContext();
+        var shot = new[] { new DiceEffect(DiceRules.Damage, "b1", "", "", "") };
+        for (var hit = 1; hit <= 2; hit++)
+        {
+            Assert.True(DiceRules.TryBuildEdits(position, shot, out var edits, out var error, null, context), error);
+            Assert.Empty(edits);
+            Assert.Equal(hit, context.Damage["b1"]);
+        }
+
+        Assert.True(DiceRules.TryBuildEdits(position, shot, out var sunk, out _, null, context));
+        Assert.Equal(["b1=-"], sunk.Select(e => e.ToString()));
+        Assert.Empty(context.Damage);
+
+        // A pawn has one hit point; kings and empty squares are misses.
+        Assert.True(DiceRules.TryBuildEdits(position, [new DiceEffect(DiceRules.Damage, "b2", "", "", "")], out var pawn, out _));
+        Assert.Equal(["b2=-"], pawn.Select(e => e.ToString()));
+        var misses = new EffectContext();
+        Assert.True(DiceRules.TryBuildEdits(position,
+            [new DiceEffect(DiceRules.Damage, "e1", "", "", ""), new DiceEffect(DiceRules.Damage, "d4", "", "", "")],
+            out var none, out _, null, misses));
+        Assert.Empty(none);
+        Assert.Equal(["e1: bounces off the white king", "d4: miss"], misses.Log);
+    }
+
+    [Fact]
+    public void Damage_follows_a_moving_piece_and_is_lost_when_it_is_captured()
+    {
+        var before = Position.FromFen("4k3/8/8/3p4/8/2N5/8/4K2R w - - 0 1");
+        var after = before.WithEdits([SquareEdit.Parse("c3=-"), SquareEdit.Parse("d5=N")]);
+        var damage = DiceRules.FollowDamage(before, after, new Dictionary<string, int> { ["c3"] = 2, ["d5"] = 0, ["h1"] = 4 });
+        Assert.Equal(new Dictionary<string, int> { ["d5"] = 2, ["h1"] = 4 }, damage);
+    }
+
+    [Fact]
+    public void Target_colours_point_at_the_player_a_rule_acts_on()
+    {
+        var effects = DiceRules.ForTarget(
+            [new DiceEffect("add", DiceRules.RandomEmpty, "", "pawn", DiceRules.Target), new DiceEffect("remove", DiceRules.RandomTargetOpponent, "", "", "")],
+            PieceColor.Black);
+        Assert.Equal("black", effects[0].Color);
+        Assert.Equal(DiceRules.RandomWhite, effects[1].Square);
+    }
+
     [Theory]
     [InlineData(2, 1, 14)]
     [InlineData(1, 1, 11)]
