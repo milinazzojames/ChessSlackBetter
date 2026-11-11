@@ -20,7 +20,11 @@ public interface ISlackApi
 
     Task UpdateMessageAsync(string channel, string ts, string text, JsonArray? blocks, CancellationToken ct = default);
 
-    Task PostEphemeralAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default);
+    /// <summary>
+    /// Answers one user (errors, help, "not your turn"…). Posted publicly in the thread, tagging them, so everyone
+    /// in the game sees what the bot said.
+    /// </summary>
+    Task PostReplyAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default);
 
     Task<string> GetBotUserIdAsync(CancellationToken ct = default);
 
@@ -69,12 +73,8 @@ public sealed class SlackApiClient(HttpClient http, IOptions<SlackOptions> optio
         return CallAsync("chat.update", body, ct);
     }
 
-    public Task PostEphemeralAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default)
-    {
-        var body = new JsonObject { ["channel"] = channel, ["user"] = user, ["text"] = text };
-        if (threadTs is not null) body["thread_ts"] = threadTs;
-        return CallAsync("chat.postEphemeral", body, ct);
-    }
+    public Task PostReplyAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default) =>
+        PostMessageAsync(new SlackMessage(channel, $"<@{user}> {text}", ThreadTs: threadTs), ct);
 
     public async Task<string> GetBotUserIdAsync(CancellationToken ct = default)
     {

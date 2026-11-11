@@ -40,7 +40,7 @@ public class ThreePlayerGameTests
         Assert.Contains($"Waiting for <@{Carol}> to accept", card);
 
         await Click(Dave, ActionIds.Accept, thread);
-        Assert.Contains("isn't for you", _slack.Ephemeral[^1].Text);
+        Assert.Contains("isn't for you", _slack.Replies[^1].Text);
 
         await Mention(Carol, "accept", thread);
         var record = await Record(thread);
@@ -56,7 +56,7 @@ public class ThreePlayerGameTests
         var (thread, white, black, red) = await StartAsync();
 
         await Say(black, "i5", thread);
-        Assert.Contains("not your turn", _slack.Ephemeral[^1].Text);
+        Assert.Contains("not your turn", _slack.Replies[^1].Text);
 
         await Say(white, "d4", thread);
         await Say(Dave, "i5", thread);
@@ -80,7 +80,7 @@ public class ThreePlayerGameTests
         Assert.Equal(GameState.Active, (await Record(thread)).State);
 
         await Say(red, "e10", thread);
-        Assert.Contains("You're out", _slack.Ephemeral[^1].Text);
+        Assert.Contains("You're out", _slack.Replies[^1].Text);
 
         await Say(white, "d4", thread);
         await Say(black, "i5", thread);
@@ -148,10 +148,10 @@ public class ThreePlayerGameTests
     public async Task Challenges_need_two_other_people()
     {
         await Mention(Alice, $"threeplayerchess <@{Bob}>");
-        Assert.Contains("don't understand", _slack.Ephemeral[^1].Text);
+        Assert.Contains("don't understand", _slack.Replies[^1].Text);
 
         await Mention(Alice, $"3p <@{Bob}> <@{Alice}>");
-        Assert.Contains("you're already in", _slack.Ephemeral[^1].Text);
+        Assert.Contains("you're already in", _slack.Replies[^1].Text);
         Assert.Empty(await _games.GetOpenGamesAsync(Alice));
     }
 
@@ -161,11 +161,11 @@ public class ThreePlayerGameTests
         var (thread, white, _, _) = await StartAsync();
 
         await Mention(white, "games");
-        Assert.Contains("3-player vs", _slack.Ephemeral[^1].Text);
-        Assert.Contains("*your move*", _slack.Ephemeral[^1].Text);
+        Assert.Contains("3-player vs", _slack.Replies[^1].Text);
+        Assert.Contains("*your move*", _slack.Replies[^1].Text);
 
         await Mention(white, "roll turn my pawn into a queen, if I fail I lose a rook", thread);
-        Assert.Contains("only for dice games", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only for dice games", _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class ThreePlayerGameTests
         await Say(red, "e10", thread);
 
         await Mention(white, "abort", thread);
-        Assert.Contains("can't be aborted", _slack.Ephemeral[^1].Text);
+        Assert.Contains("can't be aborted", _slack.Replies[^1].Text);
 
         var (other, otherWhite, _, _) = await StartAsync();
         await Mention(otherWhite, "abort", other);

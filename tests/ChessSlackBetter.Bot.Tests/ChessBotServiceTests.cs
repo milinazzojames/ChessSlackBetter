@@ -50,7 +50,7 @@ public class ChessBotServiceTests
         await Mention(Alice, $"challenge <@{Alice}>");
         await Mention(Alice, $"challenge <@{FakeSlackApi.BotId}>");
         Assert.Empty(_slack.Posted);
-        Assert.Equal(2, _slack.Ephemeral.Count);
+        Assert.Equal(2, _slack.Replies.Count);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class ChessBotServiceTests
         await Click(Carol, ActionIds.Accept, thread);
         await Click(Alice, ActionIds.Accept, thread);
         Assert.Equal(GameState.Challenged, (await _games.GetAsync(Channel, thread))!.State);
-        Assert.Equal(2, _slack.Ephemeral.Count);
+        Assert.Equal(2, _slack.Replies.Count);
 
         await Click(Bob, ActionIds.Accept, thread);
         Assert.Equal(GameState.Active, (await _games.GetAsync(Channel, thread))!.State);
@@ -79,9 +79,9 @@ public class ChessBotServiceTests
         await Mention(Bob, "pieces fantasy");
         Assert.Equal(new UserPreferences("blue", "fantasy"), _users.Preferences[Bob]);
         await Mention(Bob, "theme plaid");
-        Assert.Contains("no `plaid` board theme", _slack.Ephemeral[^1].Text);
+        Assert.Contains("no `plaid` board theme", _slack.Replies[^1].Text);
         await Mention(Bob, "pieces");
-        Assert.Contains("Your piece set is *fantasy*", _slack.Ephemeral[^1].Text);
+        Assert.Contains("Your piece set is *fantasy*", _slack.Replies[^1].Text);
 
         var thread = await StartChallenge();
         await Click(Bob, ActionIds.Accept, thread);
@@ -115,7 +115,7 @@ public class ChessBotServiceTests
 
         var record = (await _games.GetAsync(Channel, thread))!;
         Assert.Equal(["e2e4", "e7e5"], record.Moves);
-        Assert.Contains(_slack.Ephemeral, e => e.User == Bob && e.Text.Contains("not your turn"));
+        Assert.Contains(_slack.Replies, e => e.User == Bob && e.Text.Contains("not your turn"));
         Assert.Contains("Last move: `1... e5`", _slack.Posted[^1].Blocks![0]!["text"]!["text"]!.GetValue<string>());
     }
 
@@ -128,7 +128,7 @@ public class ChessBotServiceTests
         await Mention(Alice, "e2e5", thread);
 
         Assert.Equal(posted, _slack.Posted.Count);
-        var error = Assert.Single(_slack.Ephemeral);
+        var error = Assert.Single(_slack.Replies);
         Assert.Equal(Alice, error.User);
         Assert.Contains("isn't a legal move", error.Text);
     }
@@ -231,11 +231,11 @@ public class ChessBotServiceTests
     {
         var thread = await StartGame();
         await Mention(Alice, "undo", thread);
-        Assert.Contains("only undo your last move", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only undo your last move", _slack.Replies[^1].Text);
 
         await Say(Alice, "e4", thread);
         await Mention(Bob, "undo", thread);
-        Assert.Contains("only undo your last move", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only undo your last move", _slack.Replies[^1].Text);
 
         await Mention(Alice, "undo", thread);
         Assert.Contains($"<@{Alice}> took back *e4*", _slack.Posted[^2].Text);
@@ -243,7 +243,7 @@ public class ChessBotServiceTests
 
         await Say(Alice, "d4", thread);
         await Mention(Alice, "undo", thread);
-        Assert.Contains("already used your undo", _slack.Ephemeral[^1].Text);
+        Assert.Contains("already used your undo", _slack.Replies[^1].Text);
 
         // Bob still has an undo of their own, and the game carries on from the right position.
         await Say(Bob, "d5", thread);
@@ -262,7 +262,7 @@ public class ChessBotServiceTests
         await Click(Bob, ActionIds.Accept, thread);
         await Say(Alice, "g3", thread);
         await Mention(Alice, "undo", thread);
-        Assert.Contains("only allowed in normal chess", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only allowed in normal chess", _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -307,7 +307,7 @@ public class ChessBotServiceTests
     {
         await StartGame();
         await Mention(Alice, "games");
-        var reply = _slack.Ephemeral[^1].Text;
+        var reply = _slack.Replies[^1].Text;
         Assert.Contains($"vs <@{Bob}>", reply);
         Assert.Contains("*your move*", reply);
         Assert.Contains("https://example.slack.com/archives/", reply);
@@ -317,7 +317,7 @@ public class ChessBotServiceTests
     public async Task Game_commands_outside_a_game_thread_get_a_hint()
     {
         await Mention(Alice, "e4");
-        Assert.Contains("no game in this thread", _slack.Ephemeral.Single().Text);
+        Assert.Contains("no game in this thread", _slack.Replies.Single().Text);
     }
 
     [Fact]
