@@ -77,7 +77,7 @@ public class ThreePlayerDiceTests
         await Mention(white, "gamble again", thread);
         await Say(black, "veto", thread);
         Assert.NotNull((await Record(thread)).Dice.Pending);
-        Assert.Contains("already used your veto", _slack.Ephemeral[^1].Text);
+        Assert.Contains("already used your veto", _slack.Replies[^1].Text);
 
         await Say(red, "veto", thread);
         var record = await Record(thread);
@@ -101,7 +101,7 @@ public class ThreePlayerDiceTests
         await Click(Bob, ActionIds.Accept, plain.ThreadTs);
         await Click(Carol, ActionIds.Accept, plain.ThreadTs);
         await Mention(plain.WhiteId, "roll turn their queen into a pawn, if I fail I lose a rook", plain.ThreadTs);
-        Assert.Contains("only for dice games", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only for dice games", _slack.Replies[^1].Text);
     }
 
     [Fact]

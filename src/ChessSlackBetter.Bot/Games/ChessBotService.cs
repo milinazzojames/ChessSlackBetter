@@ -50,10 +50,10 @@ public sealed partial class ChessBotService(
         switch (command)
         {
             case HelpCommand:
-                await EphemeralAsync(message, Messages.HelpText, ct);
+                await ReplyAsync(message, Messages.HelpText, ct);
                 return;
             case UnknownCommand unknown when message.ThreadTs is null:
-                await EphemeralAsync(message, UnknownText(unknown), ct);
+                await ReplyAsync(message, UnknownText(unknown), ct);
                 return;
             case ChallengeCommand challenge:
                 await ChallengeAsync(message, challenge, botId, ct);
@@ -88,11 +88,11 @@ public sealed partial class ChessBotService(
                 return;
             }
 
-            await EphemeralAsync(message, "There's no game in this thread. Start one with `@ChessBetterBot challenge @someone`.", ct);
+            await ReplyAsync(message, "There's no game in this thread. Start one with `@ChessBetterBot challenge @someone`.", ct);
             return;
         }
 
-        var reply = (string text) => slack.PostEphemeralAsync(message.ChannelId, message.UserId, record.ThreadTs, text, ct);
+        var reply = (string text) => slack.PostReplyAsync(message.ChannelId, message.UserId, record.ThreadTs, text, ct);
         switch (command)
         {
             case AcceptCommand:
@@ -168,7 +168,7 @@ public sealed partial class ChessBotService(
             return;
         }
 
-        var reply = (string text) => slack.PostEphemeralAsync(action.ChannelId, action.UserId, record.ThreadTs, text, ct);
+        var reply = (string text) => slack.PostReplyAsync(action.ChannelId, action.UserId, record.ThreadTs, text, ct);
         switch (action.ActionId)
         {
             case ActionIds.Accept:
@@ -224,7 +224,7 @@ public sealed partial class ChessBotService(
             (owed.RuleId is not null || words <= 3 || command is AnswerCommand))
         {
             await AnswerRiddleAsync(riddleGame, message.UserId, answer,
-                t => slack.PostEphemeralAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct), ct);
+                t => slack.PostReplyAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct), ct);
             return;
         }
 
@@ -235,7 +235,7 @@ public sealed partial class ChessBotService(
             return;
         }
 
-        Func<string, Task> reply = t => slack.PostEphemeralAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct);
+        Func<string, Task> reply = t => slack.PostReplyAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct);
         var record = await games.GetAsync(message.ChannelId, message.ThreadTs, ct);
         if (record is null)
         {
@@ -307,13 +307,13 @@ public sealed partial class ChessBotService(
     {
         if (challenge.OpponentId == message.UserId)
         {
-            await EphemeralAsync(message, "You can't challenge yourself — mention someone else.", ct);
+            await ReplyAsync(message, "You can't challenge yourself — mention someone else.", ct);
             return;
         }
 
         if (challenge.OpponentId == botId)
         {
-            await EphemeralAsync(message, "I'm just the referee. Challenge a human!", ct);
+            await ReplyAsync(message, "I'm just the referee. Challenge a human!", ct);
             return;
         }
 
@@ -615,7 +615,7 @@ public sealed partial class ChessBotService(
         var threePlayer = await ThreePlayerOpenGameLinesAsync(message.UserId, ct);
         if (open.Count == 0 && threePlayer.Count == 0)
         {
-            await EphemeralAsync(message, "You have no open games. Start one with `@ChessBetterBot challenge @someone`.", ct);
+            await ReplyAsync(message, "You have no open games. Start one with `@ChessBetterBot challenge @someone`.", ct);
             return;
         }
 
@@ -636,7 +636,7 @@ public sealed partial class ChessBotService(
             sb.AppendLine(line);
         }
 
-        await EphemeralAsync(message, sb.ToString(), ct);
+        await ReplyAsync(message, sb.ToString(), ct);
     }
 
     private async Task StatsAsync(IncomingMessage message, string userId, CancellationToken ct)
@@ -905,19 +905,19 @@ public sealed partial class ChessBotService(
         if (name is null)
         {
             var mine = current(await users.GetPreferencesAsync(message.UserId, ct)) ?? defaultChoice;
-            await EphemeralAsync(message, $"Your {label} is *{mine}*. Change it with `@ChessBetterBot {command} <name>`: {options}.", ct);
+            await ReplyAsync(message, $"Your {label} is *{mine}*. Change it with `@ChessBetterBot {command} <name>`: {options}.", ct);
             return;
         }
 
         var choice = choices.FirstOrDefault(c => c.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (choice is null)
         {
-            await EphemeralAsync(message, $"There's no `{name}` {label}. Pick one of {options}.", ct);
+            await ReplyAsync(message, $"There's no `{name}` {label}. Pick one of {options}.", ct);
             return;
         }
 
         await save(message.UserId, choice, ct);
-        await EphemeralAsync(message, $"Your {label} is now *{choice}*. You'll see it on the board whenever it's your turn.", ct);
+        await ReplyAsync(message, $"Your {label} is now *{choice}*. You'll see it on the board whenever it's your turn.", ct);
     }
 
     private Task SaveAsync(GameRecord record, CancellationToken ct)
@@ -926,8 +926,8 @@ public sealed partial class ChessBotService(
         return games.SaveAsync(record, ct);
     }
 
-    private Task EphemeralAsync(IncomingMessage message, string text, CancellationToken ct) =>
-        slack.PostEphemeralAsync(message.ChannelId, message.UserId, message.ThreadTs, text, ct);
+    private Task ReplyAsync(IncomingMessage message, string text, CancellationToken ct) =>
+        slack.PostReplyAsync(message.ChannelId, message.UserId, message.ThreadTs, text, ct);
 
     private sealed class Standing(string userId)
     {

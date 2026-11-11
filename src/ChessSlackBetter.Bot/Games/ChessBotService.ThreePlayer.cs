@@ -13,13 +13,13 @@ public sealed partial class ChessBotService
         string[] invited = [challenge.FirstOpponentId, challenge.SecondOpponentId];
         if (invited.Contains(message.UserId))
         {
-            await EphemeralAsync(message, "Mention the two *other* people you want to play — you're already in.", ct);
+            await ReplyAsync(message, "Mention the two *other* people you want to play — you're already in.", ct);
             return;
         }
 
         if (invited.Contains(botId))
         {
-            await EphemeralAsync(message, "I'm just the referee. Challenge two humans!", ct);
+            await ReplyAsync(message, "I'm just the referee. Challenge two humans!", ct);
             return;
         }
 
@@ -48,7 +48,7 @@ public sealed partial class ChessBotService
 
     private async Task HandleThreePlayerCommandAsync(ThreePlayerRecord record, IncomingMessage message, BotCommand command, CancellationToken ct)
     {
-        var reply = (string text) => slack.PostEphemeralAsync(message.ChannelId, message.UserId, record.ThreadTs, text, ct);
+        var reply = (string text) => slack.PostReplyAsync(message.ChannelId, message.UserId, record.ThreadTs, text, ct);
         switch (command)
         {
             case AcceptCommand:
@@ -108,7 +108,7 @@ public sealed partial class ChessBotService
 
     private async Task HandleThreePlayerActionAsync(ThreePlayerRecord record, IncomingAction action, CancellationToken ct)
     {
-        var reply = (string text) => slack.PostEphemeralAsync(action.ChannelId, action.UserId, record.ThreadTs, text, ct);
+        var reply = (string text) => slack.PostReplyAsync(action.ChannelId, action.UserId, record.ThreadTs, text, ct);
         switch (action.ActionId)
         {
             case ActionIds.Accept:

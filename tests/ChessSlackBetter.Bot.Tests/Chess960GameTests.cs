@@ -59,7 +59,7 @@ public class Chess960GameTests
 
         // f8g8 could be a castle or a plain king step, so the bot asks rather than guessing.
         await Say(Bob, "f8g8", thread);
-        Assert.Contains("could be castling or just a king move", _slack.Ephemeral.Single().Text);
+        Assert.Contains("could be castling or just a king move", _slack.Replies.Single().Text);
         await Say(Bob, "O-O", thread);
 
         var record = (await _games.GetAsync(Channel, thread))!;

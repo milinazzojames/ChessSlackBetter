@@ -105,7 +105,7 @@ public class DiceGameTests
         await Say(Bob, "yes", thread);
 
         Assert.NotNull((await Record(thread)).Dice.Pending);
-        Assert.Equal(2, _slack.Ephemeral.Count(e => e.User == Bob));
+        Assert.Equal(2, _slack.Replies.Count(e => e.User == Bob));
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public class DiceGameTests
         Assert.DoesNotContain("chess_veto", _slack.Posted[^1].Blocks!.ToJsonString());
         await Mention(Bob, "veto", thread);
         Assert.NotNull((await Record(thread)).Dice.Pending);
-        Assert.Contains("already used your veto", _slack.Ephemeral[^1].Text);
+        Assert.Contains("already used your veto", _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class DiceGameTests
 
         Assert.Equal(0, (await Record(thread)).Dice.RollsLeft(Alice));
         Assert.Null((await Record(thread)).Dice.Pending);
-        Assert.Contains("used all 5", _slack.Ephemeral[^1].Text);
+        Assert.Contains("used all 5", _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public class DiceGameTests
         await Mention(Alice, "something odd", thread);
 
         Assert.Null((await Record(thread)).Dice.Pending);
-        Assert.Contains(expected, _slack.Ephemeral[^1].Text);
+        Assert.Contains(expected, _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class DiceGameTests
 
         await Mention(Alice, "make my pawn a queen", thread);
 
-        Assert.Contains("What happens if you fail?", _slack.Ephemeral[^1].Text);
+        Assert.Contains("What happens if you fail?", _slack.Replies[^1].Text);
     }
 
     [Fact]
@@ -257,13 +257,13 @@ public class DiceGameTests
     {
         var thread = await StartAfterE4E5();
         await Mention(Bob, Gamble, thread);
-        Assert.Contains("your own turn", _slack.Ephemeral[^1].Text);
+        Assert.Contains("your own turn", _slack.Replies[^1].Text);
 
         await Mention(Alice, $"challenge <@{Bob}> white");
         var standard = (await _games.GetOpenGamesAsync(Bob)).Single(g => g.Mode == GameMode.Standard).ThreadTs;
         await Click(Bob, ActionIds.Accept, standard);
         await Mention(Alice, $"roll {Gamble}", standard);
-        Assert.Contains("only for ChessDiceRoll", _slack.Ephemeral[^1].Text);
+        Assert.Contains("only for ChessDiceRoll", _slack.Replies[^1].Text);
         Assert.Empty(_judge.Requests);
     }
 
@@ -350,7 +350,7 @@ public class DiceGameTests
         // Bob is next to move, so he's asked first and can't move until he answers.
         Assert.Contains(_slack.Posted, m => m.Text.Contains($":jigsaw: <@{Bob}>, riddle time") && m.Text.Contains("hear without ears"));
         await Say(Bob, "Nc6", thread);
-        Assert.Contains("Answer your riddle first", _slack.Ephemeral[^1].Text);
+        Assert.Contains("Answer your riddle first", _slack.Replies[^1].Text);
         Assert.Equal(PieceColor.Black, (await Record(thread)).LoadGame().Current.SideToMove);
 
         // Right (plural counts too): a black pawn on the first empty square off the back ranks, e2. Still Bob's move.
@@ -434,7 +434,7 @@ public class DiceGameTests
         // Alice can move, but Bob owes a reply first; a full sentence is fine for a custom question.
         await Say(Alice, "d4", thread);
         await Say(Bob, "Nf6", thread);
-        Assert.Contains("Reply to this first", _slack.Ephemeral[^1].Text);
+        Assert.Contains("Reply to this first", _slack.Replies[^1].Text);
         _judge.RuleResults.Enqueue(new CustomRuleResult([], "{\"wins\":1}", "Rock beats scissors!", "", "", "", Expire: true));
         await Say(Bob, "I pick rock obviously", thread);
         Assert.Contains("<reply>I pick rock obviously</reply>", _judge.RuleCalls[^1].Event);

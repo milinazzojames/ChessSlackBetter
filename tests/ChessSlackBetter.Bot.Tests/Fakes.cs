@@ -19,7 +19,7 @@ public sealed class FakeSlackApi : ISlackApi
 
     public List<(string Channel, string Ts, string Text, JsonArray? Blocks)> Updated { get; } = [];
 
-    public List<(string Channel, string User, string? ThreadTs, string Text)> Ephemeral { get; } = [];
+    public List<(string Channel, string User, string? ThreadTs, string Text)> Replies { get; } = [];
 
     public Task<string> PostMessageAsync(SlackMessage message, CancellationToken ct = default)
     {
@@ -33,9 +33,9 @@ public sealed class FakeSlackApi : ISlackApi
         return Task.CompletedTask;
     }
 
-    public Task PostEphemeralAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default)
+    public Task PostReplyAsync(string channel, string user, string? threadTs, string text, CancellationToken ct = default)
     {
-        Ephemeral.Add((channel, user, threadTs, text));
+        Replies.Add((channel, user, threadTs, text));
         return Task.CompletedTask;
     }
 
