@@ -109,10 +109,10 @@ public sealed partial class ChessBotService(
                 await RequestRollAsync(record, message.UserId, roll.Request, reply, ct);
                 break;
             case AnswerCommand answer:
-                await AnswerRiddleAsync(record, message.UserId, answer.Answer, reply, ct);
+                await AnswerRiddleAsync(record, message.UserId, answer.Answer, message.Ts, reply, ct);
                 break;
             case UnknownCommand unknown when record.Dice.RiddleFor(message.UserId) is not null:
-                await AnswerRiddleAsync(record, message.UserId, unknown.Text, reply, ct);
+                await AnswerRiddleAsync(record, message.UserId, unknown.Text, message.Ts, reply, ct);
                 break;
             case UnknownCommand unknown when record.Mode == GameMode.DiceRoll && record.State == GameState.Active:
                 await RequestRollAsync(record, message.UserId, unknown.Text, reply, ct);
@@ -220,10 +220,10 @@ public sealed partial class ChessBotService(
         var words = answer.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
         if ((command is AnswerCommand || !Notation.LooksLikeMove(text)) && words > 0 &&
             await games.GetAsync(message.ChannelId, message.ThreadTs, ct) is { State: GameState.Active } riddleGame &&
-            riddleGame.Dice.RiddleFor(message.UserId) is { } owed &&
+            riddleGame.Dice.RiddleFor(message.UserId) is { } owed && owed.IsAnsweredBy(message.Ts) &&
             (owed.RuleId is not null || words <= 3 || command is AnswerCommand))
         {
-            await AnswerRiddleAsync(riddleGame, message.UserId, answer,
+            await AnswerRiddleAsync(riddleGame, message.UserId, answer, message.Ts,
                 t => slack.PostReplyAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct), ct);
             return;
         }
@@ -443,6 +443,7 @@ public sealed partial class ChessBotService(
         record.DrawOfferedBy = null;
         await SaveAsync(record, ct);
         await PostRuleNotesAsync(record, ruleNotes, ct);
+        await PostPendingQuestionsAsync(record, ct);
 
         if (game.IsOver)
         {

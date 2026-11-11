@@ -15,6 +15,9 @@ public sealed class FakeSlackApi : ISlackApi
 
     private int _nextTs = 1000;
 
+    /// <summary>One clock for posted messages and simulated user messages, so their order can be compared.</summary>
+    public string NextTs() => $"{_nextTs++}.000100";
+
     public List<SlackMessage> Posted { get; } = [];
 
     public List<(string Channel, string Ts, string Text, JsonArray? Blocks)> Updated { get; } = [];
@@ -24,7 +27,7 @@ public sealed class FakeSlackApi : ISlackApi
     public Task<string> PostMessageAsync(SlackMessage message, CancellationToken ct = default)
     {
         Posted.Add(message);
-        return Task.FromResult($"{_nextTs++}.000100");
+        return Task.FromResult(NextTs());
     }
 
     public Task UpdateMessageAsync(string channel, string ts, string text, JsonArray? blocks, CancellationToken ct = default)

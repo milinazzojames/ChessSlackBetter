@@ -154,6 +154,7 @@ public sealed partial class ChessBotService
         await CloseProposalAsync(record, proposal, outcome, ct);
         await slack.PostMessageAsync(new SlackMessage(record.ChannelId, $"<@{userId}> {outcome}", ThreadTs: record.ThreadTs), ct);
         await PostRuleNotesAsync(record, ruleNotes, ct);
+        await PostPendingQuestionsAsync(record, ct);
 
         if (game.IsOver)
         {
@@ -546,19 +547,45 @@ public sealed partial class ChessBotService
         }
 
         await SaveAsync(record, ct);
-        foreach (var riddle in asked)
-        {
-            await slack.PostMessageAsync(new SlackMessage(record.ChannelId, Messages.RiddleQuestion(riddle), ThreadTs: record.ThreadTs), ct);
-        }
-
         await PostRuleNotesAsync(record, notes, ct);
+        await PostPendingQuestionsAsync(record, ct);
     }
 
-    private async Task AnswerRiddleAsync(GameRecord record, string userId, string answer, Func<string, Task> reply, CancellationToken ct)
+    /// <summary>
+    /// Posts the riddles and rule questions that haven't been posted yet and records when each was asked, so only
+    /// replies sent after the question count as answers.
+    /// </summary>
+    private async Task PostPendingQuestionsAsync(GameRecord record, CancellationToken ct)
+    {
+        var unposted = record.Dice.Riddles.Where(r => r.AskedTs is null).ToList();
+        if (unposted.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var question in unposted)
+        {
+            var text = question.RuleId is null
+                ? Messages.RiddleQuestion(question)
+                : $":question: <@{question.SolverId}>, {question.Question}\n_Reply in the thread before your next move._";
+            question.AskedTs = await slack.PostMessageAsync(new SlackMessage(record.ChannelId, text, ThreadTs: record.ThreadTs), ct);
+        }
+
+        await SaveAsync(record, ct);
+    }
+
+    private async Task AnswerRiddleAsync(GameRecord record, string userId, string answer, string messageTs, Func<string, Task> reply, CancellationToken ct)
     {
         if (record.State != GameState.Active || record.Dice.RiddleFor(userId) is not { } riddle)
         {
             await reply("There's no riddle waiting for you.");
+            return;
+        }
+
+        if (!riddle.IsAnsweredBy(messageTs))
+        {
+            // Sent before the question was posted (e.g. while it was still being written), so it can't be an answer.
+            await reply($"That was sent before the question was asked, so it doesn't count. Reply to it now: _{riddle.Question}_");
             return;
         }
 

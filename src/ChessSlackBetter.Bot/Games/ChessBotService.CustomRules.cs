@@ -105,7 +105,6 @@ public sealed partial class ChessBotService
                 RuleId = rule.Id,
                 Summary = rule.Summary,
             });
-            notes.Add($":question: <@{solverId}>, {result.Question.Trim()}\n_Reply in the thread before your next move._");
         }
     }
 
@@ -128,6 +127,7 @@ public sealed partial class ChessBotService
         record.SyncFrom(game);
         await SaveAsync(record, ct);
         await PostRuleNotesAsync(record, notes, ct);
+        await PostPendingQuestionsAsync(record, ct);
 
         if (game.IsOver)
         {
