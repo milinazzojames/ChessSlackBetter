@@ -118,6 +118,19 @@ public sealed class PendingRiddle
     /// <summary>Set when a custom rule asked this; the reply goes back to that rule.</summary>
     public string? RuleId { get; init; }
 
+    /// <summary>
+    /// Slack ts of the message that asked it; null until it's posted. Only messages sent after this count as
+    /// answers: anything typed earlier (e.g. while the referee was still writing the question) is ignored.
+    /// </summary>
+    public string? AskedTs { get; set; }
+
+    /// <summary>Whether a message with Slack ts <paramref name="messageTs"/> was sent after the question was posted.</summary>
+    public bool IsAnsweredBy(string messageTs) =>
+        AskedTs is null || // asked before timestamps were recorded
+        decimal.TryParse(messageTs, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var sent) &&
+        decimal.TryParse(AskedTs, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var asked) &&
+        sent > asked;
+
     /// <summary>Other answers that also count as right, e.g. a plural or synonym.</summary>
     public List<string> AlsoAccepted { get; init; } = [];
 

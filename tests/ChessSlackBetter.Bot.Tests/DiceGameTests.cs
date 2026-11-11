@@ -19,7 +19,6 @@ public class DiceGameTests
     private readonly FakeDiceJudge _judge = new();
     private readonly FakeDiceRoller _roller = new();
     private readonly ChessBotService _bot;
-    private int _ts = 1;
 
     public DiceGameTests()
     {
@@ -344,8 +343,15 @@ public class DiceGameTests
             [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
 
         await Mention(Alice, "every turn a player answers a riddle, right gets a pawn else jimmy gambit, if I fail I lose a pawn", thread);
+        // Bob types this while the roll (and the riddle) is still being worked out, so it lands before the riddle.
+        var typedEarly = _slack.NextTs();
         _roller.Next = 20;
         await Click(Alice, ActionIds.Roll, thread);
+
+        // Handled after the riddle is posted, but sent before it: chat, not an answer.
+        await _bot.HandleMessageAsync(new IncomingMessage(Channel, Bob, "echo", typedEarly, thread, IsMention: false));
+        Assert.Single((await Record(thread)).Dice.Riddles);
+        Assert.DoesNotContain(_slack.Posted, m => m.Text.Contains("correct!"));
 
         // Bob is next to move, so he's asked first and can't move until he answers.
         Assert.Contains(_slack.Posted, m => m.Text.Contains($":jigsaw: <@{Bob}>, riddle time") && m.Text.Contains("hear without ears"));
@@ -428,7 +434,9 @@ public class DiceGameTests
         var record = await Record(thread);
         Assert.True(record.LoadGame().Current[Square.Parse("a2")].IsEmpty);
         Assert.Equal("{\"wins\":1}", record.Dice.Rules.Single().Memory);
-        Assert.Contains(_slack.Posted, m => m.Text.Contains("The referee threw scissors.") && m.Text.Contains($"<@{Bob}>, Rock, paper or scissors?"));
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("The referee threw scissors."));
+        Assert.Contains(_slack.Posted, m => m.Text.StartsWith($":question: <@{Bob}>, Rock, paper or scissors?"));
+        Assert.NotNull(record.Dice.Riddles.Single().AskedTs);
         Assert.Contains("Referee wins: 1", _slack.Posted[^1].Blocks!.ToJsonString());
 
         // Alice can move, but Bob owes a reply first; a full sentence is fine for a custom question.
@@ -466,7 +474,7 @@ public class DiceGameTests
     private Task Click(string user, string actionId, string thread) =>
         _bot.HandleActionAsync(new IncomingAction(actionId, user, Channel, thread));
 
-    private string NextTs() => $"{_ts++}.000001";
+    private string NextTs() => _slack.NextTs();
 }
 
 public class DiceRulesTests
