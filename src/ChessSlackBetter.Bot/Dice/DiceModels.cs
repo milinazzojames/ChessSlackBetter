@@ -35,8 +35,102 @@ public static class RuleTriggers
 /// <param name="Trigger">One of <see cref="RuleTriggers"/>.</param>
 /// <param name="Every">Fires on every Nth matching turn (1 = each one).</param>
 /// <param name="Times">How many times it fires before expiring; 0 means for the rest of the game.</param>
-/// <param name="Effects">Applied in order each time; squares may be random selectors (see <see cref="DiceRules"/>).</param>
-public sealed record DiceRuleSpec(string Trigger, int Every, int Times, IReadOnlyList<DiceEffect> Effects, string Summary);
+/// <param name="Effects">Applied in order each time; squares may be random selectors (see <see cref="DiceRules"/>).
+/// For a riddle rule these are what happens on a wrong answer.</param>
+/// <param name="Challenge">Empty for a plain rule, or <see cref="RuleChallenges.Riddle"/>: before each matching turn the
+/// player about to move has to answer a riddle first.</param>
+/// <param name="CorrectEffects">For a riddle rule, what happens on a right answer.</param>
+/// <param name="Theme">For a riddle rule, the kind of riddle the requester asked for (may be empty).</param>
+public sealed record DiceRuleSpec(
+    string Trigger,
+    int Every,
+    int Times,
+    IReadOnlyList<DiceEffect> Effects,
+    string Summary,
+    string Challenge = "",
+    IReadOnlyList<DiceEffect>? CorrectEffects = null,
+    string Theme = "",
+    string Custom = "",
+    string InitialMemory = "",
+    double CustomValue = 0)
+{
+    public bool IsRiddle => RuleChallenges.IsRiddle(Challenge);
+
+    /// <summary>
+    /// A custom rule is run by the referee itself each time it fires: <see cref="Custom"/> is the rule in plain
+    /// English, and the referee decides the effects from the board and the rule's memory. For anything the fixed
+    /// effects can't express.
+    /// </summary>
+    public bool IsCustom => !string.IsNullOrWhiteSpace(Custom);
+}
+
+/// <summary>What a custom rule's referee is told when the rule fires.</summary>
+/// <param name="Rule">The rule in plain English.</param>
+/// <param name="Owner">The colour of the player whose gamble created the rule.</param>
+/// <param name="Memory">Whatever the rule wrote down last time (free-form, usually JSON).</param>
+/// <param name="Event">What just happened: the end of a turn, or a player's answer to the rule's question.</param>
+/// <param name="RandomNumbers">Fresh random numbers from 1 to 100, so the referee never has to invent randomness.</param>
+/// <param name="Damage">Damage on the board's pieces, by square.</param>
+public sealed record CustomRuleCall(
+    ChessSlackBetter.Chess.Position Position,
+    string Rule,
+    ChessSlackBetter.Chess.PieceColor Owner,
+    string Memory,
+    string Event,
+    IReadOnlyList<int> RandomNumbers,
+    IReadOnlyDictionary<string, int> Damage);
+
+/// <summary>The referee's ruling for one firing of a custom rule. Unused fields are empty.</summary>
+/// <param name="Effects">Board effects, applied after the turn like any rule's.</param>
+/// <param name="Memory">The rule's memory for next time.</param>
+/// <param name="Message">What to tell the players about this firing.</param>
+/// <param name="Status">A short line shown under the board while the rule is in play (e.g. scores or health).</param>
+/// <param name="AskColor">white or black to ask that player <paramref name="Question"/>; they must reply before moving.</param>
+/// <param name="Expire">True when the rule has run its course.</param>
+public sealed record CustomRuleResult(
+    IReadOnlyList<DiceEffect> Effects,
+    string Memory,
+    string Message,
+    string Status,
+    string AskColor,
+    string Question,
+    bool Expire);
+
+public static class RuleChallenges
+{
+    public const string None = "";
+
+    public const string Riddle = "riddle";
+
+    public static bool IsRiddle(string? challenge) => string.Equals(challenge, Riddle, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>A riddle waiting for <see cref="SolverId"/> to answer before they can move.</summary>
+public sealed class PendingRiddle
+{
+    public required string SolverId { get; init; }
+
+    public required string Question { get; init; }
+
+    /// <summary>The riddle's answer; empty for a custom rule's question, which the referee judges.</summary>
+    public required string Answer { get; init; }
+
+    /// <summary>Set when a custom rule asked this; the reply goes back to that rule.</summary>
+    public string? RuleId { get; init; }
+
+    /// <summary>Other answers that also count as right, e.g. a plural or synonym.</summary>
+    public List<string> AlsoAccepted { get; init; } = [];
+
+    /// <summary>The rule's effects with its target colours already pointed at the solver.</summary>
+    public List<DiceEffect> CorrectEffects { get; init; } = [];
+
+    public List<DiceEffect> WrongEffects { get; init; } = [];
+
+    public required string Summary { get; init; }
+}
+
+/// <summary>A riddle as written by the referee.</summary>
+public sealed record Riddle(string Question, string Answer, IReadOnlyList<string> AlsoAccepted);
 
 /// <summary>A passive rule in play. Stored as JSON with the game's dice state.</summary>
 public sealed class PassiveRule
@@ -58,10 +152,39 @@ public sealed class PassiveRule
 
     public required string Summary { get; init; }
 
-    public bool Matches(string moverId) => Trigger switch
+    /// <summary>Empty, or <see cref="RuleChallenges.Riddle"/> (then <see cref="Effects"/> are for a wrong answer).</summary>
+    public string Challenge { get; init; } = "";
+
+    public List<DiceEffect> CorrectEffects { get; init; } = [];
+
+    public string Theme { get; init; } = "";
+
+    public bool IsRiddle => RuleChallenges.IsRiddle(Challenge);
+
+    /// <summary>Identifies the rule, so a question it asked can find it again.</summary>
+    public string Id { get; init; } = Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>For a custom rule, the rule in plain English (see <see cref="DiceRuleSpec.IsCustom"/>).</summary>
+    public string Custom { get; init; } = "";
+
+    /// <summary>A custom rule's memory between firings.</summary>
+    public string Memory { get; set; } = "";
+
+    /// <summary>A custom rule's latest status line, shown under the board.</summary>
+    public string Status { get; set; } = "";
+
+    public bool IsCustom => !string.IsNullOrWhiteSpace(Custom);
+
+    /// <summary>
+    /// Whether the rule applies to a turn by <paramref name="playerId"/>: the player who just moved for a plain
+    /// rule, or the player about to move for a riddle.
+    /// </summary>
+    public bool Matches(string playerId) => Matches(Trigger, OwnerId, playerId);
+
+    public static bool Matches(string trigger, string ownerId, string playerId) => trigger switch
     {
-        RuleTriggers.OwnTurn => moverId == OwnerId,
-        RuleTriggers.OpponentTurn => moverId != OwnerId,
+        RuleTriggers.OwnTurn => playerId == ownerId,
+        RuleTriggers.OpponentTurn => playerId != ownerId,
         _ => true,
     };
 
@@ -73,6 +196,11 @@ public sealed class PassiveRule
         TimesLeft = spec.Times > 0 ? spec.Times : null,
         Effects = spec.Effects.ToList(),
         Summary = spec.Summary,
+        Challenge = spec.IsRiddle ? RuleChallenges.Riddle : RuleChallenges.None,
+        CorrectEffects = spec.CorrectEffects?.ToList() ?? [],
+        Theme = spec.Theme ?? "",
+        Custom = spec.Custom ?? "",
+        Memory = spec.InitialMemory ?? "",
     };
 }
 
@@ -137,6 +265,17 @@ public sealed class DiceState
 
     /// <summary>Passive rules won (or lost) from gambles, still in play.</summary>
     public List<PassiveRule> Rules { get; set; } = [];
+
+    /// <summary>Riddles waiting to be answered, oldest first. The solver can't move or gamble until theirs are done.</summary>
+    public List<PendingRiddle> Riddles { get; set; } = [];
+
+    /// <summary>Answers to riddles already asked this game, so the referee doesn't repeat itself.</summary>
+    public List<string> RiddleAnswers { get; set; } = [];
+
+    /// <summary>Damage taken by pieces still on the board (square name to points), from damage effects.</summary>
+    public Dictionary<string, int> Damage { get; set; } = new();
+
+    public PendingRiddle? RiddleFor(string userId) => Riddles.FirstOrDefault(r => r.SolverId == userId);
 
     public int RollsLeft(string userId) => DiceLimits.RollsPerPlayer - RollsUsed.GetValueOrDefault(userId);
 

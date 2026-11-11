@@ -108,6 +108,12 @@ public sealed partial class ChessBotService(
             case RollRequestCommand roll:
                 await RequestRollAsync(record, message.UserId, roll.Request, reply, ct);
                 break;
+            case AnswerCommand answer:
+                await AnswerRiddleAsync(record, message.UserId, answer.Answer, reply, ct);
+                break;
+            case UnknownCommand unknown when record.Dice.RiddleFor(message.UserId) is not null:
+                await AnswerRiddleAsync(record, message.UserId, unknown.Text, reply, ct);
+                break;
             case UnknownCommand unknown when record.Mode == GameMode.DiceRoll && record.State == GameState.Active:
                 await RequestRollAsync(record, message.UserId, unknown.Text, reply, ct);
                 break;
@@ -206,6 +212,22 @@ public sealed partial class ChessBotService(
 
         var text = message.Text.Trim();
         var command = CommandParser.Parse(text);
+
+        // A player who owes an answer can just type it. Something that looks like a move is a move attempt (which
+        // gets a reminder), and for a riddle (one-word answers) longer messages are chat; `answer <x>` always counts.
+        // A custom rule's question can take any reply.
+        var answer = command is AnswerCommand a ? a.Answer : text;
+        var words = answer.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        if ((command is AnswerCommand || !Notation.LooksLikeMove(text)) && words > 0 &&
+            await games.GetAsync(message.ChannelId, message.ThreadTs, ct) is { State: GameState.Active } riddleGame &&
+            riddleGame.Dice.RiddleFor(message.UserId) is { } owed &&
+            (owed.RuleId is not null || words <= 3 || command is AnswerCommand))
+        {
+            await AnswerRiddleAsync(riddleGame, message.UserId, answer,
+                t => slack.PostEphemeralAsync(message.ChannelId, message.UserId, message.ThreadTs, t, ct), ct);
+            return;
+        }
+
         var isDiceAnswer = command is ConfirmRollCommand or CancelRollCommand or VetoCommand;
         var looksLikeThreePlayerMove = TriNotation.LooksLikeMove(text);
         if (!Notation.LooksLikeMove(text) && !isDiceAnswer && !looksLikeThreePlayerMove)
@@ -395,6 +417,12 @@ public sealed partial class ChessBotService(
             return;
         }
 
+        if (await OwesRiddleAsync(record, userId, reply))
+        {
+            return;
+        }
+
+        var before = game.Current;
         if (!game.TryPlay(input, out _, out var error))
         {
             await reply(error);
@@ -408,7 +436,9 @@ public sealed partial class ChessBotService(
             await CloseProposalAsync(record, pending, "_Withdrawn: they moved instead._", ct);
         }
 
+        FollowDamage(record, before, game.Current);
         var ruleNotes = record.Mode == GameMode.DiceRoll ? FireRules(record, game, userId) : [];
+        ruleNotes.AddRange(await FireCustomRulesAsync(record, game, userId, ct));
         record.SyncFrom(game);
         record.DrawOfferedBy = null;
         await SaveAsync(record, ct);
@@ -421,6 +451,7 @@ public sealed partial class ChessBotService(
         else
         {
             await PostBoardAsync(record, game, ct);
+            await AskRiddlesAsync(record, game, ct);
         }
 
         await MaybeQuoteAsync(record, game, ct);

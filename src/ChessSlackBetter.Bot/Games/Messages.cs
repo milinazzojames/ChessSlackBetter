@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ChessSlackBetter.Chess;
+using ChessSlackBetter.Bot.Dice;
 
 namespace ChessSlackBetter.Bot.Games;
 
@@ -48,6 +49,11 @@ public static partial class Messages
         • So do lasting rules, e.g. `every turn I gain a pawn on a random empty square, if I fail I lose my queen`
         • Anything goes, as long as the penalty really costs you. Say `Jimmy gambit` to sacrifice everything but
           your king and the pieces shielding it
+        • Riddle rules: `every turn the player to move answers a riddle: right gains a pawn, wrong is a Jimmy gambit`.
+          Type your answer in the thread before you move
+        • Damage rules: `battleship: after every turn hit a random square; pieces have HP equal to their value`
+        • Anything else becomes a custom rule that the referee runs every turn, with its own memory, questions and
+          scoreboard, e.g. `pieces that sit still for 3 turns grow into the next piece up`
 
         *Chess960* :twisted_rightwards_arrows:
         • `@ChessBetterBot chess960 @someone` (or `challenge @someone 960`) — Fischer Random: normal rules, but the
@@ -193,7 +199,22 @@ public static partial class Messages
             if (dice.Rules.Count > 0)
             {
                 blocks.Add(Context(":repeat: *Rules in play:*\n" + string.Join('\n', dice.Rules.Select(r =>
-                    $"• {r.Summary} _(<@{r.OwnerId}>'s gamble{(r.TimesLeft is { } left ? $", {left} more" : "")})_"))));
+                    $"• {(r.IsRiddle ? ":jigsaw: " : r.IsCustom ? ":sparkles: " : "")}{r.Summary} _(<@{r.OwnerId}>'s gamble{(r.TimesLeft is { } left ? $", {left} more" : "")})_" +
+                    (string.IsNullOrWhiteSpace(r.Status) ? "" : $"\n   {r.Status}")))));
+            }
+
+            var damaged = dice.Damage
+                .Where(d => Square.TryParse(d.Key, out var sq) && !position[sq].IsEmpty)
+                .Select(d =>
+                {
+                    var piece = position[Square.Parse(d.Key)];
+                    var health = DiceRules.PieceValue(piece.Type);
+                    return $"{d.Key} {DiceRules.Describe(piece)} {health - d.Value}/{health}";
+                })
+                .ToList();
+            if (damaged.Count > 0)
+            {
+                blocks.Add(Context(":boom: *Damaged:* " + string.Join(" · ", damaged)));
             }
         }
         else if (record.Chess960Number is { } number)
