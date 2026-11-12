@@ -135,6 +135,11 @@ public sealed partial class ChessBotService
         }
 
         FollowDamage(record, before, game.Current);
+        if (picked.Resigns)
+        {
+            game.Resign(record.ColorOf(userId));
+        }
+
         var outcome = Messages.DiceRollOutcome(proposal, roll, success, picked.Summary);
         record.Dice.RollsUsed[userId] = record.Dice.RollsUsed.GetValueOrDefault(userId) + 1;
         record.Dice.Log.Add(new DiceRollResult(userId, proposal.Request, proposal.Target, roll, success, picked.Summary));
@@ -252,9 +257,23 @@ public sealed partial class ChessBotService
         string? firstError = null;
         foreach (var option in options)
         {
-            if (TryPrepareOption(position, option, pick, out var edits, out var optionError))
+            var summary = string.IsNullOrWhiteSpace(option.Summary) ? overallSummary : option.Summary;
+            if (option.Effects.Any(DiceRules.IsResign))
             {
-                var summary = string.IsNullOrWhiteSpace(option.Summary) ? overallSummary : option.Summary;
+                // Resigning ends the game, so nothing else in the option matters. Only the requester may resign:
+                // making the opponent resign would just be winning the game on a roll.
+                var requester = position.SideToMove.ToString();
+                if (option.Effects.Where(DiceRules.IsResign).All(e => e.Color == "" || e.Color.Equals(requester, StringComparison.OrdinalIgnoreCase)))
+                {
+                    outcomes.Add(new DiceOutcome([], summary, Resigns: true));
+                }
+                else
+                {
+                    firstError ??= "Dice can't make your opponent resign; that would win the game outright.";
+                }
+            }
+            else if (TryPrepareOption(position, option, pick, out var edits, out var optionError))
+            {
                 var rules = option.Rules is { Count: > 0 } r ? r.ToList() : null;
                 outcomes.Add(new DiceOutcome(edits.Select(e => e.ToString()).ToList(), summary, rules));
             }
@@ -362,6 +381,11 @@ public sealed partial class ChessBotService
     private static double AverageMaterial(Position position, List<DiceOutcome> outcomes, PieceColor player) =>
         outcomes.Average(o =>
         {
+            if (o.Resigns)
+            {
+                return -DiceRules.ResignCost(position, player);
+            }
+
             var edits = o.Edits.Select(SquareEdit.Parse).ToList();
             var after = position.WithEdits(edits);
             return DiceRules.MaterialDelta(position, edits, player) +

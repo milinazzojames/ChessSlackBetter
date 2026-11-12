@@ -367,6 +367,28 @@ public static class DiceRules
     /// <summary>Effect type for the Jimmy gambit (see <see cref="ApplyJimmyGambit"/>).</summary>
     public const string JimmyGambit = "jimmy_gambit";
 
+    /// <summary>
+    /// Effect type: the requester resigns and the game ends. Only allowed in a gamble's one-off outcomes, and only
+    /// for the requester; dice can't make the opponent resign.
+    /// </summary>
+    public const string Resign = "resign";
+
+    /// <summary>What a lost game is worth, in pawns, when the material is level.</summary>
+    public const int ResignBaseCost = 10;
+
+    public static bool IsResign(DiceEffect effect) => effect.Type.Equals(Resign, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What resigning costs <paramref name="player"/>, in pawns: a lost game is worth about
+    /// <see cref="ResignBaseCost"/> at level material, less when they're already behind (there's little left to
+    /// lose, so a "win big or resign" gamble gets long odds) and more when they're ahead.
+    /// </summary>
+    public static double ResignCost(Position position, PieceColor player)
+    {
+        var balance = Enumerable.Range(0, 64).Sum(sq => SignedValue(position[sq], player));
+        return Math.Clamp(ResignBaseCost + balance, 1, 2 * ResignBaseCost);
+    }
+
     private static readonly (int File, int Rank)[] Orthogonals = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
     private static readonly (int File, int Rank)[] Diagonals = [(1, 1), (1, -1), (-1, 1), (-1, -1)];

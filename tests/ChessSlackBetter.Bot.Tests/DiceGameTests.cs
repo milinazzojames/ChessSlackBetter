@@ -453,6 +453,44 @@ public class DiceGameTests
         Assert.Contains(_slack.Posted, m => m.Text.Contains("Rock beats scissors!") && m.Text.Contains("has ended"));
     }
 
+    [Fact]
+    public async Task A_player_can_bet_the_game_and_resigns_if_the_roll_fails()
+    {
+        var thread = await StartAfterE4E5();
+        _judge.Ruling = FakeDiceJudge.Accept(
+            [new DiceEffect(DiceRules.JimmyGambit, "", "", "", "black")],
+            [new DiceEffect(DiceRules.Resign, "", "", "", "white")]);
+
+        await Mention(Alice, "jimmy gambit my opponent else I resign", thread);
+
+        var pending = (await Record(thread)).Dice.Pending;
+        Assert.NotNull(pending);
+        Assert.True(pending.FailureOutcomes.Single().Resigns);
+
+        // Level material: losing the game is priced at 10 pawns against what the Jimmy gambit wins.
+        _roller.Next = pending.Target - 1;
+        await Click(Alice, ActionIds.Roll, thread);
+
+        var record = await Record(thread);
+        Assert.Equal(GameState.Finished, record.State);
+        Assert.Equal(GameOutcome.BlackWins, record.LoadGame().Outcome);
+        Assert.Contains(_slack.Posted, m => m.Text.Contains("resigned"));
+    }
+
+    [Fact]
+    public async Task Dice_cant_make_the_opponent_resign()
+    {
+        var thread = await StartAfterE4E5();
+        _judge.Ruling = FakeDiceJudge.Accept(
+            [new DiceEffect(DiceRules.Resign, "", "", "", "black")],
+            [new DiceEffect("remove", "e4", "", "", "")]);
+
+        await Mention(Alice, "my opponent resigns else I lose my pawn", thread);
+
+        Assert.Null((await Record(thread)).Dice.Pending);
+        Assert.Contains("resign", _slack.Replies[^1].Text);
+    }
+
     private async Task<string> StartAfterE4E5()
     {
         await Mention(Alice, $"diceroll <@{Bob}> white");
@@ -479,6 +517,20 @@ public class DiceGameTests
 
 public class DiceRulesTests
 {
+    [Fact]
+    public void Resigning_costs_less_the_further_behind_you_are()
+    {
+        Assert.Equal(DiceRules.ResignBaseCost, DiceRules.ResignCost(Position.Start, PieceColor.White));
+
+        // White has only a pawn against a queen and rook: down 13, so resigning costs almost nothing.
+        var losing = Position.FromFen("r3k3/8/8/8/8/8/4P3/3qK3 w - - 0 1");
+        Assert.Equal(1, DiceRules.ResignCost(losing, PieceColor.White));
+        Assert.Equal(2 * DiceRules.ResignBaseCost, DiceRules.ResignCost(losing, PieceColor.Black));
+
+        // So "Jimmy gambit my opponent, else I resign" from there is a long shot.
+        Assert.Equal(20, DiceRules.FairTarget(14, DiceRules.ResignCost(losing, PieceColor.White)));
+    }
+
     [Fact]
     public void Damage_sinks_a_piece_once_its_hit_points_run_out()
     {

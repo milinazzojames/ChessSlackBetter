@@ -55,6 +55,11 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
           says "Jimmy gambit" (as the reward, the penalty, or both), with `color` set to the side sacrificing
           (the requester unless they say otherwise) and `square` empty. Don't list the removals yourself.
           A Jimmy gambit is a valid downside, and one inflicted on the opponent doesn't touch their king.
+        - resign: the requester resigns and loses the game. A valid (if drastic) penalty for a failed roll, e.g.
+          "Jimmy gambit my opponent, else I resign": players may bet the whole game, so accept it. Set `color` to
+          the requester's colour and put it alone in its option. Dice can never make the opponent resign, and
+          resign can't be used in passive rules. Code prices a resignation itself (a lost game is worth less to a
+          player who is already losing), so use a positional bonus of 0 for that outcome.
         Leave unused fields as empty strings. Teleports don't have to be legal chess moves.
 
         Each outcome is a list of options, each with its own effects and summary. Usually there is exactly one.
@@ -171,7 +176,7 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
-    private static readonly Dictionary<string, JsonElement> Schema = BuildSchema(["", "white", "black", DiceRules.Target, DiceRules.TargetOpponent], ["transform", "remove", "add", "move", DiceRules.JimmyGambit, DiceRules.Damage], withRules: true);
+    private static readonly Dictionary<string, JsonElement> Schema = BuildSchema(["", "white", "black", DiceRules.Target, DiceRules.TargetOpponent], ["transform", "remove", "add", "move", DiceRules.JimmyGambit, DiceRules.Damage, DiceRules.Resign], withRules: true);
 
     /// <summary>
     /// The three-player board differs: square names, three colours, two opponents, and where pawns promote.
@@ -193,7 +198,7 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
         rank (a white pawn can't go on rank 8 or 12, a black pawn on rank 1 or 12, a red pawn on rank 1 or 8). Instead
         of the two-move rule above: refuse a gamble whose win would checkmate an opponent straight away.
 
-        Three-player games don't have passive rules (so no riddles or damage), random selectors, target colours or the Jimmy gambit (jimmy_gambit): use
+        Three-player games don't have passive rules (so no riddles or damage), random selectors, target colours, resign or the Jimmy gambit (jimmy_gambit): use
         exact squares, list random possibilities as options, and reject requests that need a lasting rule.
 
         Positional bonuses are still from the requester's point of view. Code already counts damage to one opponent
