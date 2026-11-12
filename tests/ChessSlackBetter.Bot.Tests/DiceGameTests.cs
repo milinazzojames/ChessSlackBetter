@@ -478,6 +478,34 @@ public class DiceGameTests
     }
 
     [Fact]
+    public async Task A_player_in_check_can_bet_the_game_and_resign()
+    {
+        await Mention(Alice, $"diceroll <@{Bob}> white");
+        var thread = (await _games.GetOpenGamesAsync(Bob)).Single(g => g.State == GameState.Challenged).ThreadTs;
+        await Click(Bob, ActionIds.Accept, thread);
+        await Say(Alice, "d4", thread);
+        await Say(Bob, "e5", thread);
+        await Say(Alice, "a3", thread);
+        await Say(Bob, "Bb4+", thread);
+        Assert.True((await Record(thread)).LoadGame().Current.IsInCheck());
+
+        _judge.Ruling = FakeDiceJudge.Accept(
+            [new DiceEffect(DiceRules.JimmyGambit, "", "", "", "black")],
+            [new DiceEffect(DiceRules.Resign, "", "", "", "white")]);
+        await Mention(Alice, "jimmy gambit my opponent else resign", thread);
+        var pending = (await Record(thread)).Dice.Pending;
+        Assert.NotNull(pending);
+
+        _roller.Next = pending.Target - 1;
+        await Click(Alice, ActionIds.Roll, thread);
+
+        var record = await Record(thread);
+        Assert.Equal(GameState.Finished, record.State);
+        Assert.Equal(GameOutcome.BlackWins, record.LoadGame().Outcome);
+        Assert.DoesNotContain(_slack.Updated, u => u.Text.Contains("went wrong"));
+    }
+
+    [Fact]
     public async Task Dice_cant_make_the_opponent_resign()
     {
         var thread = await StartAfterE4E5();
