@@ -169,9 +169,9 @@ public sealed class FakeDiceJudge : IDiceJudge
 
 public sealed class FakeDiceRoller : IDiceRoller
 {
-    public int Next { get; set; } = 20;
+    public int Next { get; set; } = DiceRules.DieSides;
 
-    public int RollD20() => Next;
+    public int Roll() => Next;
 
     public int NextPick { get; set; }
 

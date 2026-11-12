@@ -462,17 +462,23 @@ public static class DiceRules
         return delta;
     }
 
+    /// <summary>Sides on the gamble die.</summary>
+    public const int DieSides = 100;
+
+    public const string DieName = "d100";
+
     /// <summary>
-    /// The minimum d20 roll that makes the gamble fair: succeeding with probability p is fair when
-    /// p × gain = (1 − p) × loss, i.e. p = loss / (gain + loss).
+    /// The minimum roll that makes the gamble fair: succeeding with probability p is fair when
+    /// p × gain = (1 − p) × loss, i.e. p = loss / (gain + loss). Never a sure thing either way: at worst a 1-in-100
+    /// shot, at best a 99% chance.
     /// </summary>
     public static int FairTarget(double gain, double loss)
     {
         var p = loss / (gain + loss);
-        return (int)Math.Clamp(Math.Round(21 - 20 * p, MidpointRounding.AwayFromZero), 2, 20);
+        return (int)Math.Clamp(Math.Round(DieSides + 1 - DieSides * p, MidpointRounding.AwayFromZero), 2, DieSides);
     }
 
-    public static int SuccessPercent(int target) => (21 - target) * 5;
+    public static int SuccessPercent(int target) => (DieSides + 1 - target) * 100 / DieSides;
 
     private static int SignedValue(Piece piece, PieceColor player) =>
         piece.IsEmpty ? 0 : piece.Color == player ? PieceValue(piece.Type) : -PieceValue(piece.Type);

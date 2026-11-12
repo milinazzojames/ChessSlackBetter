@@ -20,7 +20,7 @@ public sealed class ThreePlayerRecord
 
     public required string RedId { get; init; }
 
-    /// <summary>Three-player ChessDiceRoll: players may gamble on a d20 instead of moving.</summary>
+    /// <summary>Three-player ChessDiceRoll: players may gamble on a d100 instead of moving.</summary>
     public bool WithDice { get; init; }
 
     /// <summary>Rolls, vetoes and the pending gamble. Only used when <see cref="WithDice"/> is set.</summary>

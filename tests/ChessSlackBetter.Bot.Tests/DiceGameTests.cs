@@ -51,10 +51,10 @@ public class DiceGameTests
         var pending = (await Record(thread)).Dice.Pending;
         Assert.NotNull(pending);
 
-        // Success gains 2 (pawn -> bishop), failure loses 1: fair odds are 1/3, so 14+ on a d20.
-        Assert.Equal(14, pending.Target);
-        Assert.Contains("14+", _slack.Posted[^1].Text);
-        Assert.Contains("35% chance", _slack.Posted[^1].Blocks!.ToJsonString());
+        // Success gains 2 (pawn -> bishop), failure loses 1: fair odds are 1/3, so 68+ on a d100.
+        Assert.Equal(68, pending.Target);
+        Assert.Contains("68+", _slack.Posted[^1].Text);
+        Assert.Contains("33% chance", _slack.Posted[^1].Blocks!.ToJsonString());
         Assert.Equal(PieceColor.White, (await Record(thread)).LoadGame().Current.SideToMove);
     }
 
@@ -63,7 +63,7 @@ public class DiceGameTests
     {
         var thread = await StartAfterE4E5();
         await Mention(Alice, Gamble, thread);
-        _roller.Next = 17;
+        _roller.Next = 80;
 
         await Click(Alice, ActionIds.Roll, thread);
 
@@ -74,7 +74,7 @@ public class DiceGameTests
         Assert.Null(record.Dice.Pending);
         Assert.Equal(DiceLimits.RollsPerPlayer - 1, record.Dice.RollsLeft(Alice));
         Assert.True(record.Dice.Log.Single().Success);
-        Assert.Contains("Rolled *17*", _slack.Updated[^1].Text);
+        Assert.Contains("Rolled *80*", _slack.Updated[^1].Text);
         Assert.Contains("hl=e4", _slack.Posted[^1].Blocks!.ToJsonString());
     }
 
@@ -83,7 +83,7 @@ public class DiceGameTests
     {
         var thread = await StartAfterE4E5();
         await Mention(Alice, Gamble, thread);
-        _roller.Next = 13;
+        _roller.Next = 60;
 
         await Say(Alice, "yes", thread);
 
@@ -211,10 +211,10 @@ public class DiceGameTests
 
         await Mention(Alice, "turn a random one of their pieces into a pawn, if I fail I lose my knight", thread);
 
-        // Gains average (8 + 2) / 2 = 5 against a loss of 3: fair odds are 3/8, so 13.5, rounded to 14+.
+        // Gains average (8 + 2) / 2 = 5 against a loss of 3: fair odds are 3/8, so 63.5, rounded to 64+.
         var pending = (await Record(thread)).Dice.Pending!;
         Assert.Equal(2, pending.SuccessOutcomes.Count);
-        Assert.Equal(14, pending.Target);
+        Assert.Equal(64, pending.Target);
 
         await Click(Alice, ActionIds.Roll, thread);
         var position = (await Record(thread)).LoadGame().Current;
@@ -298,10 +298,10 @@ public class DiceGameTests
 
         await Mention(Alice, "every turn I gain a pawn on a random empty square, if I fail I lose a pawn", thread);
 
-        // Two pawns from the rule against one lost: fair odds are 1/3, so 14+.
-        Assert.Equal(14, (await Record(thread)).Dice.Pending!.Target);
+        // Two pawns from the rule against one lost: fair odds are 1/3, so 68+.
+        Assert.Equal(68, (await Record(thread)).Dice.Pending!.Target);
 
-        _roller.Next = 20;
+        _roller.Next = DiceRules.DieSides;
         await Click(Alice, ActionIds.Roll, thread);
         Assert.Single((await Record(thread)).Dice.Rules);
         Assert.Contains("Rules in play", _slack.Posted[^1].Blocks!.ToJsonString());
@@ -345,7 +345,7 @@ public class DiceGameTests
         await Mention(Alice, "every turn a player answers a riddle, right gets a pawn else jimmy gambit, if I fail I lose a pawn", thread);
         // Bob types this while the roll (and the riddle) is still being worked out, so it lands before the riddle.
         var typedEarly = _slack.NextTs();
-        _roller.Next = 20;
+        _roller.Next = DiceRules.DieSides;
         await Click(Alice, ActionIds.Roll, thread);
 
         // Handled after the riddle is posted, but sent before it: chat, not an answer.
@@ -387,7 +387,7 @@ public class DiceGameTests
             [new DiceOption([new DiceEffect("remove", "a2", "", "", "")], "Your a2 pawn is removed")]);
 
         await Mention(Alice, "battleship, if I fail I lose a pawn", thread);
-        _roller.Next = 20;
+        _roller.Next = DiceRules.DieSides;
         await Click(Alice, ActionIds.Roll, thread);
 
         await Say(Bob, "Nc6", thread);
@@ -415,9 +415,9 @@ public class DiceGameTests
 
         await Mention(Alice, "rock paper scissors every turn, if I fail I lose a pawn", thread);
 
-        // Priced on the referee's estimate: worth 2, risking 1, so fair odds are 1/3 (14+).
-        Assert.Equal(14, (await Record(thread)).Dice.Pending!.Target);
-        _roller.Next = 20;
+        // Priced on the referee's estimate: worth 2, risking 1, so fair odds are 1/3 (68+).
+        Assert.Equal(68, (await Record(thread)).Dice.Pending!.Target);
+        _roller.Next = DiceRules.DieSides;
         await Click(Alice, ActionIds.Roll, thread);
         Assert.Empty(_judge.RuleCalls);
 
@@ -556,7 +556,7 @@ public class DiceRulesTests
         Assert.Equal(2 * DiceRules.ResignBaseCost, DiceRules.ResignCost(losing, PieceColor.Black));
 
         // So "Jimmy gambit my opponent, else I resign" from there is a long shot.
-        Assert.Equal(20, DiceRules.FairTarget(14, DiceRules.ResignCost(losing, PieceColor.White)));
+        Assert.Equal(94, DiceRules.FairTarget(14, DiceRules.ResignCost(losing, PieceColor.White)));
     }
 
     [Fact]
@@ -607,11 +607,11 @@ public class DiceRulesTests
     }
 
     [Theory]
-    [InlineData(2, 1, 14)]
-    [InlineData(1, 1, 11)]
-    [InlineData(8, 1, 19)]
-    [InlineData(1, 8, 3)]
-    [InlineData(100, 1, 20)]
+    [InlineData(2, 1, 68)]
+    [InlineData(1, 1, 51)]
+    [InlineData(8, 1, 90)]
+    [InlineData(1, 8, 12)]
+    [InlineData(100, 1, 100)]
     [InlineData(1, 100, 2)]
     public void Fair_target_balances_reward_and_risk(double gain, double loss, int expected)
     {
