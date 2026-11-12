@@ -27,7 +27,7 @@ public static partial class Messages
             Context("A triangular board for three. Checkmate someone and they're out; the last player standing wins. " +
                     "Pawns promote on either opponent's back rank. " +
                     (record.WithDice
-                        ? $"On your turn you can gamble on a d20 instead of moving: {DiceLimitsText}, so each gamble can be vetoed by either opponent. "
+                        ? $"On your turn you can gamble on a d100 instead of moving: {DiceLimitsText}, so each gamble can be vetoed by either opponent. "
                         : "") +
                     "`@ChessBetterBot help` for the rules."),
             Actions(
@@ -171,7 +171,7 @@ public static partial class Messages
 
     public static SlackContent ThreePlayerDiceProposal(ThreePlayerRecord record, TriGame game, Dice.DiceProposal proposal)
     {
-        var odds = $"Roll *{proposal.Target}+* on a d20 ({Dice.DiceRules.SuccessPercent(proposal.Target)}% chance)";
+        var odds = $"Roll *{proposal.Target}+* on a {Dice.DiceRules.DieName} ({Dice.DiceRules.SuccessPercent(proposal.Target)}% chance)";
         var body =
             $":game_die: <@{proposal.RequesterId}> proposes a gamble:\n" +
             $">{proposal.Request}\n" +

@@ -40,9 +40,9 @@ public class ThreePlayerDiceTests
 
         await Mention(white, "turn black's queen into a pawn, if I fail I lose my a1 rook", thread);
 
-        // Black loses 8, which is worth 8 / 2 = 4 to white; failing costs white 5. Fair odds 5/9, so 10+ on a d20.
+        // Black loses 8, which is worth 8 / 2 = 4 to white; failing costs white 5. Fair odds 5/9, so 45+ on a d100.
         var pending = (await Record(thread)).Dice.Pending!;
-        Assert.Equal(10, pending.Target);
+        Assert.Equal(45, pending.Target);
         Assert.Contains($"<@{black}> or <@{red}> can veto this", _slack.Posted[^1].Blocks!.ToJsonString().Replace("\\u003C", "<").Replace("\\u003E", ">"));
         Assert.Equal(TriColor.White, (await Record(thread)).LoadGame().Current.SideToMove);
     }
@@ -52,7 +52,7 @@ public class ThreePlayerDiceTests
     {
         var (thread, white, _, _) = await StartAsync();
         await Mention(white, "gamble", thread);
-        _roller.Next = 15;
+        _roller.Next = 70;
 
         await Say(white, "yes", thread);
 

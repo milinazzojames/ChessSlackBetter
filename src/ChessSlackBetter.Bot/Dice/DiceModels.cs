@@ -248,7 +248,7 @@ public sealed class DiceProposal
 
     public required string FailureSummary { get; init; }
 
-    /// <summary>Minimum d20 roll needed to succeed.</summary>
+    /// <summary>Minimum d100 roll needed to succeed.</summary>
     public required int Target { get; init; }
 
     public required string Reasoning { get; init; }

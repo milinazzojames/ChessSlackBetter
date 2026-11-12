@@ -112,7 +112,7 @@ public sealed partial class ChessBotService
             return;
         }
 
-        var roll = dice.RollD20();
+        var roll = dice.Roll();
         var success = roll >= proposal.Target;
         var outcomes = success ? proposal.SuccessOutcomes : proposal.FailureOutcomes;
         var picked = outcomes.Count == 0 ? null : outcomes[dice.Pick(outcomes.Count)];

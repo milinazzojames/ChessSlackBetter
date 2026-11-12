@@ -36,21 +36,21 @@ Play chess against other people in Slack threads. A C# / .NET 10 rebuild of
 
 ## ChessDiceRoll
 
-A variant: normal chess, but on your turn you may gamble on a d20 instead of moving.
+A variant: normal chess, but on your turn you may gamble on a d100 instead of moving.
 
 ```
 @ChessBetterBot diceroll @friend
 ...
 @ChessBetterBot roll turn my e4 pawn into a bishop, if I fail I lose the pawn
   → Success: e4 pawn becomes a bishop. Failure: e4 pawn removed.
-    Roll 14+ on a d20 (35% chance).  [Roll] [Cancel] [Veto]
+    Roll 68+ on a d100 (33% chance).  [Roll] [Cancel] [Veto]
 ```
 
 - Every gamble needs a reward **and** a penalty. Claude reads the request and turns it into board changes;
   code checks they're legal and sets the odds, and the die is rolled with a cryptographic RNG.
 - **Fair odds:** with piece values pawn 1, knight/bishop 3, rook 5, queen 9, a gamble that gains `G` on success
   and loses `L` on failure should succeed with probability `L / (G + L)`. Claude can shift the values by up to
-  ±3 pawns for position (e.g. a new piece that forks the queen). The target is the d20 roll that matches.
+  ±3 pawns for position (e.g. a new piece that forks the queen). The target is the d100 roll that matches.
 - Only the requester can **Roll** (or say `yes`) or **Cancel** (`no`). Rolling uses your turn.
 - Each player gets **5 rolls** per game. Cancelled or vetoed gambles don't count, and don't use your turn.
 - The opponent gets **1 veto** per game.

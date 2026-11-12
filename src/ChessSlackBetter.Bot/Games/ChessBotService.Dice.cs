@@ -4,7 +4,7 @@ using ChessSlackBetter.Chess;
 
 namespace ChessSlackBetter.Bot.Games;
 
-/// <summary>ChessDiceRoll: on their turn a player may gamble on a d20 instead of moving.</summary>
+/// <summary>ChessDiceRoll: on their turn a player may gamble on a d100 instead of moving.</summary>
 public sealed partial class ChessBotService
 {
     private async Task RequestRollAsync(GameRecord record, string userId, string request, Func<string, Task> reply, CancellationToken ct)
@@ -118,7 +118,7 @@ public sealed partial class ChessBotService
 
         var game = record.LoadGame();
         var before = game.Current;
-        var roll = dice.RollD20();
+        var roll = dice.Roll();
         var success = roll >= proposal.Target;
         var outcomes = success ? proposal.SuccessOutcomes : proposal.FailureOutcomes;
         var picked = outcomes.Count == 0 ? null : outcomes[dice.Pick(outcomes.Count)];

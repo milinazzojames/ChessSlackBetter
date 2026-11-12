@@ -42,7 +42,7 @@ public static partial class Messages
         • `@ChessBetterBot diceroll @someone` (or `gambit @someone`) — normal chess, plus gambles
         • On your turn, instead of moving, describe a gamble with a reward *and* a penalty:
           `@ChessBetterBot roll turn my e4 pawn into a bishop, if I fail I lose the pawn`
-        • The bot works out the fair d20 roll; you then press *Roll* (or say `yes`) or *Cancel* (`no`)
+        • The bot works out the fair d100 roll; you then press *Roll* (or say `yes`) or *Cancel* (`no`)
         • Rolling uses your turn. 5 rolls per player per game; cancelled rolls don't count
         • Your opponent can veto one gamble per game. Dice can't touch kings or set up checkmate within two moves
         • Random gambles work too, e.g. `turn a random one of their pieces into a pawn, if I fail I lose my knight`
@@ -117,7 +117,7 @@ public static partial class Messages
         };
         if (mode == GameMode.DiceRoll)
         {
-            blocks.Add(Context("Normal chess, except on your turn you can gamble on a d20 instead of moving. " +
+            blocks.Add(Context("Normal chess, except on your turn you can gamble on a d100 instead of moving. " +
                                $"{DiceLimitsText}. `@ChessBetterBot help` for the rules."));
         }
 
@@ -234,7 +234,7 @@ public static partial class Messages
     {
         var opponent = record.OpponentOf(proposal.RequesterId);
         var vetoes = record.Dice.VetoesLeft(opponent);
-        var odds = $"Roll *{proposal.Target}+* on a d20 ({Dice.DiceRules.SuccessPercent(proposal.Target)}% chance)";
+        var odds = $"Roll *{proposal.Target}+* on a {Dice.DiceRules.DieName} ({Dice.DiceRules.SuccessPercent(proposal.Target)}% chance)";
         var body =
             $":game_die: <@{proposal.RequesterId}> proposes a gamble:\n" +
             $">{proposal.Request}\n" +

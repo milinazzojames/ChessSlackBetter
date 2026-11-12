@@ -41,7 +41,7 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
 {
     private const string SystemPrompt = """
         You are the referee for ChessDiceRoll, a chess variant played in Slack. On their turn, instead of moving,
-        a player may propose a gamble: something they want to happen on the board if they win a d20 roll, and a
+        a player may propose a gamble: something they want to happen on the board if they win a d100 roll, and a
         penalty if they lose. Your job is to translate the request into board effects for both outcomes. You do not
         choose the number to roll; code computes it from the material at stake plus your positional estimates.
 
@@ -564,8 +564,8 @@ public sealed class ClaudeDiceJudge(IOptions<AnthropicOptions> options, ILogger<
 
 public interface IDiceRoller
 {
-    /// <summary>A fair d20 roll, 1 to 20.</summary>
-    int RollD20();
+    /// <summary>A fair roll of the gamble die, 1 to <see cref="DiceRules.DieSides"/>.</summary>
+    int Roll();
 
     /// <summary>A uniformly random index from 0 to <paramref name="count"/> − 1, for random gamble outcomes.</summary>
     int Pick(int count);
@@ -573,7 +573,7 @@ public interface IDiceRoller
 
 public sealed class CryptoDiceRoller : IDiceRoller
 {
-    public int RollD20() => System.Security.Cryptography.RandomNumberGenerator.GetInt32(1, 21);
+    public int Roll() => System.Security.Cryptography.RandomNumberGenerator.GetInt32(1, DiceRules.DieSides + 1);
 
     public int Pick(int count) => System.Security.Cryptography.RandomNumberGenerator.GetInt32(count);
 }
