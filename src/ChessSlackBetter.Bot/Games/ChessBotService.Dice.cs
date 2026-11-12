@@ -125,7 +125,9 @@ public sealed partial class ChessBotService
 
         record.Dice.Pending = null;
         string? error = "No outcomes were stored for this gamble.";
-        if (picked is null || !game.TryApplyEdits(picked.Edits.Select(SquareEdit.Parse).ToList(), out error))
+        // A resignation changes nothing on the board, so it isn't checked as an edit: the requester may well be in
+        // check (that's usually why they're betting the game), which an empty edit would count as illegal.
+        if (picked is null || (!picked.Resigns && !game.TryApplyEdits(picked.Edits.Select(SquareEdit.Parse).ToList(), out error)))
         {
             // The board can't have changed since the proposal, so this shouldn't happen; don't charge a roll for it.
             logger.LogError("Approved gamble could not be applied: {Error}", error);
