@@ -258,9 +258,10 @@ public sealed class DiceProposal
 }
 
 /// <summary>A checked, ready-to-apply result. Square edits in text form, e.g. "e4=B"; empty means nothing changes.</summary>
-public sealed record DiceOutcome(List<string> Edits, string Summary, List<DiceRuleSpec>? Rules = null)
+/// <param name="Resigns">The requester resigns and the game ends (the board edits and rules don't matter then).</param>
+public sealed record DiceOutcome(List<string> Edits, string Summary, List<DiceRuleSpec>? Rules = null, bool Resigns = false)
 {
-    public bool ChangesNothing => Edits.Count == 0 && (Rules is null || Rules.Count == 0);
+    public bool ChangesNothing => !Resigns && Edits.Count == 0 && (Rules is null || Rules.Count == 0);
 }
 
 public sealed record DiceRollResult(string UserId, string Request, int Target, int Roll, bool Success, string Summary);
